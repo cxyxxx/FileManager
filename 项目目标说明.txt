@@ -1,0 +1,698 @@
+
+使用react+tauri实现这个项目
+**这个项目的基础层，不是页面层，而是 7 个底座：**
+
+1. 应用壳与启动层
+2. 工作区与文件系统层
+3. 数据库与迁移层
+4. 领域模型与规则层
+5. Tauri 命令边界层
+6. React 应用壳与前端数据层
+7. 配置、日志、错误与测试层
+
+Tauri 这条技术线本身就鼓励你把前端和 Rust 边界分清：前端通过 `command` 调 Rust，命令可以收参、返回值、返回错误，也可以异步；Tauri 还提供事件系统；命令很多时也建议拆到独立模块里，而不是都塞进 `lib.rs`。Rust 侧还能通过 `manage` 和 `State` 管理全局状态。([Tauri][1])
+
+---
+
+# 一、基础层的总分工
+
+先把责任分干净，不然后面会越来越乱。
+
+## React 侧负责
+
+* 页面与交互
+* 当前视图状态
+* 表单编辑状态
+* 查询条件状态
+* 调用命令、展示结果
+* 轻量本地 UI 偏好
+
+## Rust / Tauri 侧负责
+
+* 文件导入与复制
+* 工作区初始化
+* 数据库连接与迁移
+* tag 层级规则
+* 版本链规则
+* 聚合查询
+* 未归类判定
+* 冻结规则
+* 所有真正会破坏一致性的写操作
+
+这不是死规定，是为了降低 bug 面。
+你的项目里最危险的不是“UI 画错”，而是“文件、tag、版本关系写乱了”。所以**核心写操作应该收口到 Rust**。
+
+---
+
+# 二、推荐的项目目录骨架
+
+## 前端 `src/`
+
+```text
+src/
+  app/
+    router/
+    providers/
+    layouts/
+  pages/
+    inbox/
+    tag/
+    file/
+    versions/
+    queries/
+    settings/
+  features/
+    files/
+      api/
+      hooks/
+      components/
+      state/
+    tags/
+      api/
+      hooks/
+      components/
+      state/
+    versions/
+      api/
+      hooks/
+      components/
+      state/
+    queries/
+      api/
+      hooks/
+      components/
+      state/
+  shared/
+    ui/
+    lib/
+    types/
+    utils/
+```
+
+## Tauri / Rust `src-tauri/src/`
+
+```text
+src-tauri/src/
+  lib.rs
+  commands/
+    mod.rs
+    workspace.rs
+    files.rs
+    tags.rs
+    versions.rs
+    queries.rs
+    settings.rs
+  app/
+    state.rs
+    bootstrap.rs
+  domain/
+    file.rs
+    tag.rs
+    version.rs
+    query.rs
+    errors.rs
+  services/
+    workspace_service.rs
+    file_service.rs
+    tag_service.rs
+    version_service.rs
+    query_service.rs
+    settings_service.rs
+  repositories/
+    file_repo.rs
+    tag_repo.rs
+    version_repo.rs
+    query_repo.rs
+  db/
+    mod.rs
+    connection.rs
+    migrations.rs
+  infra/
+    fs.rs
+    hashing.rs
+    preview.rs
+    clock.rs
+    ids.rs
+  policies/
+    inbox_policy.rs
+    freeze_policy.rs
+    aggregation_policy.rs
+    tag_policy.rs
+```
+
+这个结构的核心思想很简单：
+
+* `commands/` 是边界
+* `services/` 是用例
+* `repositories/` 是持久化
+* `domain/` 是概念和规则
+* `infra/` 是技术细节
+
+---
+
+# 三、一级基础模块与详细开发内容
+
+---
+
+## 1. 应用壳与启动层
+
+这是第一个必须搭的底座。
+
+### Rust 侧要做的事
+
+* `tauri::Builder` 初始化
+* 注册插件
+* 注册命令
+* 初始化全局状态
+* 启动时做 bootstrap
+
+Tauri 官方的命令系统就是前端调用 Rust 的主通道；命令可以异步，也建议按模块拆分。全局应用状态可以通过 `Builder.manage(...)` 注入，再在命令里用 `State` 访问。([Tauri][1])
+
+### 你要落地的具体内容
+
+* `run()` 里初始化：
+
+  * workspace 根路径
+  * 数据库连接池/数据库句柄
+  * 配置服务
+  * 日志服务
+* 命令注册：
+
+  * `init_workspace`
+  * `import_files`
+  * `create_tag`
+  * `attach_tags_to_file`
+  * `create_derived_version`
+  * `get_tag_page_data`
+  * `query_files`
+  * `get_inbox_files`
+
+### React 侧要做的事
+
+* 应用入口
+* 路由
+* 全局 Provider
+* 统一错误提示
+* 启动时加载：
+
+  * 应用配置
+  * 最近打开的入口
+  * 初始树/导航
+
+---
+
+## 2. 工作区与文件系统层
+
+这是你项目的“物理底盘”。
+
+### 目标
+
+解决这些问题：
+
+* 文件怎么进入系统
+* 进入后放哪
+* 如何校验文件是否还在
+* 如何打开/定位文件
+* 如何生成稳定的工作区结构
+
+### Tauri 相关能力
+
+* 原生文件选择可以用 Dialog 插件；它能弹系统文件对话框。([Tauri][2])
+* 但 Dialog 的 `open()` 只是把所选路径加入文件系统 scope，而且**这个 scope 不会持久化到重启之后**；官方还明确说如果安全性比便利用法更重要，优先写专用 command。([Tauri][3])
+* FS 插件会阻止路径穿越，要求路径受 scope 约束。([Tauri][4])
+
+### 我对你项目的建议
+
+**文件选择可以前端调 dialog，但真正导入一定走 Rust command。**
+
+也就是：
+
+1. React 打开系统文件选择器
+2. 把用户选中的路径交给 `import_files`
+3. Rust 负责：
+
+   * 校验
+   * 复制到工作区
+   * 生成内部文件 ID
+   * 写入数据库
+   * 生成基础元数据
+
+### 你要开发的子模块
+
+#### `workspace_service`
+
+* 初始化工作区目录
+* 返回目录结构
+* 校验工作区是否可用
+
+#### `file_service`
+
+* 导入文件
+* 批量导入
+* 删除文件
+* 归档文件
+* 打开文件
+* reveal in folder
+* 重算 hash
+* 检查文件缺失
+
+#### `infra/fs.rs`
+
+* 复制/移动封装
+* 路径标准化
+* 文件名冲突处理
+* 安全路径检查
+
+### 工作区建议结构
+
+```text
+workspace/
+  data/
+    app.db
+    settings.json
+  files/
+    yyyy/
+      mm/
+        <file-id>_<name>
+  previews/
+  temp/
+  logs/
+```
+
+---
+
+## 3. 数据库与迁移层
+
+这个层决定你后面是不是会反复重构。
+
+### 目标
+
+* 建库
+* 跑迁移
+* 提供统一事务入口
+* 隔离 SQL 细节
+
+### Tauri 相关能力
+
+Tauri 官方 SQL 插件提供前端通过 `sqlx` 访问 SQL 数据库的接口，支持 SQLite / MySQL / PostgreSQL，并通过 Cargo feature 打开具体驱动。([Tauri][5])
+
+### 我对你项目的建议
+
+这个项目虽然可以用 Tauri SQL 插件，但**核心写操作我更建议收在 Rust 侧 repository/service**。
+原因不是插件不行，而是你的系统有很多规则：
+
+* 单父约束
+* 防环
+* 交付冻结
+* 核心版本唯一
+* 未归类判定
+
+这些规则散到 React 或 SQL 直调层，后面会很难控。
+
+### 你要开发的子模块
+
+#### `db/connection.rs`
+
+* 打开 SQLite
+* PRAGMA 初始化
+* 事务封装
+
+#### `db/migrations.rs`
+
+* 启动时检查 schema version
+* 执行迁移
+* 记录 migration 历史
+
+#### `repositories/`
+
+每张核心表至少有对应 repo：
+
+* `file_repo`
+* `tag_repo`
+* `version_repo`
+* `query_repo`
+
+### 这里先定的原则
+
+* 所有写操作走 service
+* repository 只做 CRUD / query
+* 所有跨表一致性放 service + transaction
+
+---
+
+## 4. 领域模型与规则层
+
+这是你项目真正的“本体”。
+
+### 目标
+
+把这些概念写成稳定对象：
+
+* File
+* Tag
+* TagType
+* FileTagRelation
+* VersionGroup
+* VersionNode
+* VersionEdge
+* SavedQuery
+
+### 你要开发的子模块
+
+#### `domain/file.rs`
+
+* 文件实体
+* 文件状态
+* 冻结状态
+
+#### `domain/tag.rs`
+
+* tag
+* tag type
+* 作为主题使用
+* 层级关系
+
+#### `domain/version.rs`
+
+* 版本角色
+* 核心版本角色
+* 派生关系
+
+#### `domain/query.rs`
+
+* 单 tag 查询
+* 父级聚合查询
+* 多 tag AND / OR
+
+#### `domain/errors.rs`
+
+统一错误类型：
+
+* not found
+* conflict
+* invalid hierarchy
+* file missing
+* frozen content
+* duplicate relation
+
+### 规则层 `policies/`
+
+这是你项目非常值得单独拉出来的一层。
+
+#### `tag_policy.rs`
+
+* 单父限制
+* 防环
+* type 必填
+* 推荐复用已有 tag 的匹配入口
+
+#### `freeze_policy.rs`
+
+* 交付版不可直接改
+* 只能派生新版本
+
+#### `aggregation_policy.rs`
+
+* 结构模式
+* 聚合模式
+* 去重规则
+* 聚合计数规则
+
+#### `inbox_policy.rs`
+
+* 没有任何 `is_topic_enabled=true` 的 tag -> 未归类
+
+---
+
+## 5. Tauri 命令边界层
+
+这层很关键。
+它是 React 和 Rust 的唯一正式边界。
+
+Tauri 的 command 适合做“明确的用例操作”；事件系统适合做“进度、通知、状态广播”。([Tauri][1])
+
+### 你应该怎么分
+
+**命令负责业务动作，事件负责过程通知。**
+
+### 命令分组建议
+
+#### `commands/workspace.rs`
+
+* `init_workspace()`
+* `get_workspace_info()`
+* `repair_workspace()`
+
+#### `commands/files.rs`
+
+* `import_files(paths)`
+* `get_file_detail(file_id)`
+* `update_file_metadata(file_id, payload)`
+* `archive_file(file_id)`
+* `open_file(file_id)`
+
+#### `commands/tags.rs`
+
+* `create_tag(payload)`
+* `update_tag(tag_id, payload)`
+* `set_tag_parent(child_id, parent_id)`
+* `set_tag_topic_enabled(tag_id, enabled)`
+* `attach_tags_to_file(file_id, tag_ids)`
+* `detach_tag_from_file(file_id, tag_id)`
+
+#### `commands/versions.rs`
+
+* `create_derived_version(source_file_id, payload)`
+* `set_version_role(file_id, role)`
+* `set_core_version(version_group_id, role, file_id)`
+* `get_version_chain(file_id)`
+
+#### `commands/queries.rs`
+
+* `get_inbox_files()`
+* `get_tag_page_data(tag_id, mode)`
+* `query_files_by_tags(tag_ids, mode)`
+* `save_query(payload)`
+* `get_saved_queries()`
+
+### 事件建议
+
+#### 用事件，不用命令返回流式进度的场景
+
+* 大批量导入进度
+* 缩略图生成进度
+* 索引修复进度
+* 数据迁移完成通知
+
+---
+
+## 6. React 应用壳与前端数据层
+
+这一层不要承担规则，只承担“组织页面”和“消费结果”。
+
+### 目标
+
+* 管理页面状态
+* 管理查询状态
+* 管理表单状态
+* 把 Rust 返回结果映射到 UI
+
+### 推荐拆法
+
+#### `features/files`
+
+* 文件列表
+* 文件详情
+* 文件元数据表单
+* 文件操作 hooks
+
+#### `features/tags`
+
+* tag 树
+* tag 编辑器
+* tag 页
+* 绑定弹窗
+
+#### `features/versions`
+
+* 版本链视图
+* 派生版本表单
+* 核心版本标记
+
+#### `features/queries`
+
+* AND / OR 查询器
+* 保存查询入口
+* 查询结果页
+
+### React 侧要固定的原则
+
+* 不直接写业务规则
+* 不直接拼复杂 SQL
+* 不在组件里散写 `invoke()`
+* 命令调用集中在 `api/` 或 `services/` 层
+
+### 一个很实用的前端约束
+
+每个 feature 都有：
+
+* `api/`：调 Tauri command
+* `hooks/`：页面状态与数据获取
+* `components/`：展示组件
+* `state/`：仅本 feature 的本地状态
+
+---
+
+## 7. 配置、日志、错误与测试层
+
+这个层最容易被拖到最后，但基础层里必须先有骨架。
+
+### 配置层
+
+对于少量配置，Tauri 的 Store 插件可以持久化键值数据到后端存储；它支持手动保存或自动保存。([Tauri][6])
+
+#### 适合放 Store 的内容
+
+* 最近打开的页面
+* 侧边栏宽度
+* 默认视图模式
+* 最近使用的 tag 类型
+* pinned saved queries
+
+#### 不适合放 Store 的内容
+
+* 核心业务数据
+* tag / 文件 / 版本关系
+
+### 日志层
+
+至少要有：
+
+* Rust 命令错误日志
+* 文件导入失败日志
+* 数据迁移日志
+
+### 错误层
+
+建立统一错误码：
+
+* `FILE_NOT_FOUND`
+* `TAG_CONFLICT`
+* `TAG_HIERARCHY_CYCLE`
+* `DELIVERY_FILE_FROZEN`
+* `INVALID_VERSION_ROLE`
+* `UNCLASSIFIED_REQUIRED`
+
+### 测试层
+
+你这项目最该先测的不是组件，而是规则。
+
+#### Rust 侧优先测试
+
+* tag 防环
+* 单父限制
+* 未归类判定
+* 创建派生版本
+* 交付版冻结
+* 聚合查询去重
+
+#### React 侧优先测试
+
+* 页面状态切换
+* 查询条件表单
+* 文件详情编辑流程
+* tag 绑定交互
+
+---
+
+# 四、建议的开发顺序
+
+这个顺序能最大限度减少返工。
+
+## 第 1 阶段：跑通底盘
+
+* Tauri app shell
+* workspace 初始化
+* SQLite 建库 + migration
+* 基础 commands 框架
+* React 页面壳
+
+## 第 2 阶段：先打通文件 + tag
+
+* 导入文件
+* 创建 tag
+* 文件绑定 tag
+* tag 树展示
+* 收件箱规则
+
+## 第 3 阶段：打通版本链
+
+* 派生版本
+* 母版 / 工作版 / 交付版
+* 核心版本
+* 冻结规则
+
+## 第 4 阶段：打通查询与聚合
+
+* 单 tag 页
+* 父 tag 结构模式
+* 父 tag 聚合模式
+* 多 tag AND / OR
+* 保存查询
+
+## 第 5 阶段：补增强层
+
+* 摘要编辑
+* 基础预览
+* 缩略图
+* 沟通产物
+* 设置页
+
+---
+
+# 五、你现在最该先写的基础层清单
+
+如果你准备正式开工，我建议先把下面这些文件写出来，哪怕很多函数先是空壳：
+
+## Rust 侧
+
+* `app/bootstrap.rs`
+* `app/state.rs`
+* `db/connection.rs`
+* `db/migrations.rs`
+* `domain/file.rs`
+* `domain/tag.rs`
+* `domain/version.rs`
+* `services/file_service.rs`
+* `services/tag_service.rs`
+* `services/version_service.rs`
+* `services/query_service.rs`
+* `commands/files.rs`
+* `commands/tags.rs`
+* `commands/versions.rs`
+* `commands/queries.rs`
+
+## React 侧
+
+* `app/router`
+* `pages/inbox`
+* `pages/tag`
+* `pages/file`
+* `features/files/api`
+* `features/tags/api`
+* `features/versions/api`
+* `features/queries/api`
+
+---
+
+# 六、最关键的一句话
+
+**你的基础层不是“先把 React 页面搭起来”，而是“先把 Rust 的工作区、数据库、规则、命令边界搭起来”。**
+
+因为这个项目最难的地方从来不是 UI，而是：
+
+* 文件是否稳定
+* 关系是否一致
+* 规则是否集中
+* 查询是否可扩展
+
