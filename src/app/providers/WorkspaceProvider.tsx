@@ -15,6 +15,7 @@ type WorkspaceContextValue = {
   loading: boolean;
   error: string | null;
   initialize: (path?: string) => Promise<void>;
+  refresh: () => Promise<void>;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -37,6 +38,18 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setWorkspace(await getWorkspaceInfo());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     getWorkspaceInfo()
       .then(setWorkspace)
@@ -45,8 +58,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   }, [initialize]);
 
   const value = useMemo(
-    () => ({ workspace, loading, error, initialize }),
-    [workspace, loading, error, initialize],
+    () => ({ workspace, loading, error, initialize, refresh }),
+    [workspace, loading, error, initialize, refresh],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

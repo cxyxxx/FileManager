@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 
 use crate::app::state::{AppState, WorkspaceContext};
 use crate::domain::errors::{AppError, AppResult};
-use crate::domain::file::{FileRecord, FileStatus, FreezeStatus};
+use crate::domain::file::{FilePageData, FileRecord, FileStatus, FreezeStatus};
 use crate::domain::version::VersionNode;
 use crate::infra::{clock, fs, hashing, ids};
-use crate::repositories::{file_repo, version_repo};
+use crate::repositories::{file_repo, tag_repo, version_repo};
 
 pub fn import_files(state: &AppState, paths: Vec<String>) -> AppResult<Vec<FileRecord>> {
     let workspace = state.workspace()?;
@@ -25,10 +25,29 @@ pub fn get_file_detail(state: &AppState, file_id: &str) -> AppResult<FileRecord>
     workspace.with_db(|connection| file_repo::get(connection, file_id))
 }
 
+pub fn list_files(state: &AppState) -> AppResult<Vec<FileRecord>> {
+    let workspace = state.workspace()?;
+    workspace.with_db(file_repo::list_all)
+}
+
+pub fn get_file_page_data(state: &AppState, file_id: &str) -> AppResult<FilePageData> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| {
+        let file = file_repo::get(connection, file_id)?;
+        let tags = tag_repo::list_for_file(connection, file_id)?;
+        Ok(FilePageData { file, tags })
+    })
+}
+
 pub fn archive_file(state: &AppState, file_id: &str) -> AppResult<()> {
     let workspace = state.workspace()?;
     workspace.with_db(|connection| {
-        file_repo::update_status(connection, file_id, FileStatus::Archived.as_str(), &clock::now_iso())
+        file_repo::update_status(
+            connection,
+            file_id,
+            FileStatus::Archived.as_str(),
+            &clock::now_iso(),
+        )
     })
 }
 

@@ -26,6 +26,11 @@ export type FileRecord = {
   updatedAt: string;
 };
 
+export type FilePageData = {
+  file: FileRecord;
+  tags: Tag[];
+};
+
 export type Tag = {
   id: string;
   name: string;

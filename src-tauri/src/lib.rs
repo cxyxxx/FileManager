@@ -19,6 +19,8 @@ pub fn run() {
             commands::workspace::repair_workspace,
             commands::files::import_files,
             commands::files::get_file_detail,
+            commands::files::list_files,
+            commands::files::get_file_page_data,
             commands::files::archive_file,
             commands::files::open_file,
             commands::tags::create_tag,

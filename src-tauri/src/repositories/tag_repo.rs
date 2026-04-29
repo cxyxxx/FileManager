@@ -82,6 +82,23 @@ pub fn list_by_ids(connection: &Connection, tag_ids: &[String]) -> AppResult<Vec
     Ok(tags)
 }
 
+pub fn list_for_file(connection: &Connection, file_id: &str) -> AppResult<Vec<Tag>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT tags.*
+        FROM tags
+        JOIN file_tags ON file_tags.tag_id = tags.id
+        WHERE file_tags.file_id = ?1
+        ORDER BY tags.tag_type, tags.name
+        "#,
+    )?;
+    let rows = statement.query_map(params![file_id], map_tag)?;
+    let tags = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)?;
+    Ok(tags)
+}
+
 pub fn update_parent(
     connection: &Connection,
     child_id: &str,

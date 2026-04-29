@@ -1,15 +1,22 @@
-import { useMemo, useState } from "react";
-import type { AppRoute } from "../router/routes";
+import { useEffect, useMemo, useState } from "react";
+import { matchRoute, navigateTo, type AppRoute } from "../router/routes";
 import { useWorkspace } from "../providers/WorkspaceProvider";
 
 export function AppLayout({ routes }: { routes: AppRoute[] }) {
-  const [activeRouteId, setActiveRouteId] = useState(routes[0]?.id ?? "inbox");
+  const [pathname, setPathname] = useState(window.location.pathname);
   const { workspace, loading, error } = useWorkspace();
 
-  const activeRoute = useMemo(
-    () => routes.find((route) => route.id === activeRouteId) ?? routes[0],
-    [activeRouteId, routes],
-  );
+  useEffect(() => {
+    if (window.location.pathname === "/") {
+      navigateTo("/inbox", true);
+    }
+    const onPopState = () => setPathname(window.location.pathname);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const activeMatch = useMemo(() => matchRoute(pathname), [pathname]);
+  const navRoutes = routes.filter((route) => route.nav);
 
   return (
     <div className="app-shell">
@@ -22,12 +29,12 @@ export function AppLayout({ routes }: { routes: AppRoute[] }) {
           </div>
         </div>
         <nav className="nav-list" aria-label="Primary">
-          {routes.map((route) => (
+          {navRoutes.map((route) => (
             <button
-              className={route.id === activeRoute.id ? "nav-item active" : "nav-item"}
+              className={isActiveNav(route.path, pathname) ? "nav-item active" : "nav-item"}
               key={route.id}
               type="button"
-              onClick={() => setActiveRouteId(route.id)}
+              onClick={() => navigateTo(route.path)}
             >
               {route.label}
             </button>
@@ -37,15 +44,19 @@ export function AppLayout({ routes }: { routes: AppRoute[] }) {
       <main className="content">
         <header className="topbar">
           <div>
-            <h1>{activeRoute.label}</h1>
+            <h1>{activeMatch.route.label}</h1>
             <p>{workspace?.rootPath ?? "Workspace is being initialized"}</p>
           </div>
           <div className={loading ? "status loading" : error ? "status error" : "status"}>
             {loading ? "Loading" : error ?? "Ready"}
           </div>
         </header>
-        {activeRoute.element}
+        {activeMatch.route.render(activeMatch.params)}
       </main>
     </div>
   );
+}
+
+function isActiveNav(routePath: string, pathname: string) {
+  return pathname === routePath || pathname.startsWith(`${routePath}/`);
 }

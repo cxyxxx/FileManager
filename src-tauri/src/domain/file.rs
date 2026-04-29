@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::domain::tag::Tag;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileRecord {
@@ -14,6 +16,13 @@ pub struct FileRecord {
     pub freeze_status: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePageData {
+    pub file: FileRecord,
+    pub tags: Vec<Tag>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

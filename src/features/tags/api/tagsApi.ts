@@ -19,7 +19,3 @@ export function listTags() {
 export function setTagParent(childId: string, parentId?: string | null) {
   return command<Tag>("set_tag_parent", { childId, parentId: parentId ?? null });
 }
-
-export function attachTagsToFile(fileId: string, tagIds: string[]) {
-  return command<void>("attach_tags_to_file", { fileId, tagIds });
-}
