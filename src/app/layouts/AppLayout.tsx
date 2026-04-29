@@ -1,20 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { matchRoute, navigateTo, type AppRoute } from "../router/routes";
 import { useWorkspace } from "../providers/WorkspaceProvider";
+import { SearchBar } from "../../features/search/components/SearchBar";
 
 export function AppLayout({ routes }: { routes: AppRoute[] }) {
-  const [pathname, setPathname] = useState(window.location.pathname);
+  const [locationKey, setLocationKey] = useState(window.location.pathname + window.location.search);
   const { workspace, loading, error } = useWorkspace();
 
   useEffect(() => {
     if (window.location.pathname === "/") {
       navigateTo("/inbox", true);
     }
-    const onPopState = () => setPathname(window.location.pathname);
+    const onPopState = () => setLocationKey(window.location.pathname + window.location.search);
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
 
+  const pathname = window.location.pathname;
   const activeMatch = useMemo(() => matchRoute(pathname), [pathname]);
   const navRoutes = routes.filter((route) => route.nav);
 
@@ -47,11 +49,12 @@ export function AppLayout({ routes }: { routes: AppRoute[] }) {
             <h1>{activeMatch.route.label}</h1>
             <p>{workspace?.rootPath ?? "Workspace is being initialized"}</p>
           </div>
+          <SearchBar initialValue={new URLSearchParams(window.location.search).get("q") ?? ""} />
           <div className={loading ? "status loading" : error ? "status error" : "status"}>
             {loading ? "Loading" : error ?? "Ready"}
           </div>
         </header>
-        {activeMatch.route.render(activeMatch.params)}
+        <div key={locationKey}>{activeMatch.route.render(activeMatch.params)}</div>
       </main>
     </div>
   );

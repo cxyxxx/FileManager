@@ -1,6 +1,6 @@
 use crate::app::state::AppState;
 use crate::domain::errors::{AppError, AppResult};
-use crate::domain::tag::{CreateTagPayload, Tag};
+use crate::domain::tag::{CreateTagPayload, Tag, UpdateTagPayload};
 use crate::infra::{clock, ids};
 use crate::policies::tag_policy::{self, TagHierarchyItem};
 use crate::repositories::{file_repo, tag_repo};
@@ -32,7 +32,11 @@ pub fn list_tags(state: &AppState) -> AppResult<Vec<Tag>> {
     workspace.with_db(tag_repo::list)
 }
 
-pub fn set_tag_parent(state: &AppState, child_id: &str, parent_id: Option<String>) -> AppResult<Tag> {
+pub fn set_tag_parent(
+    state: &AppState,
+    child_id: &str,
+    parent_id: Option<String>,
+) -> AppResult<Tag> {
     let workspace = state.workspace()?;
     workspace.with_db(|connection| {
         tag_repo::get(connection, child_id)?;
@@ -48,7 +52,73 @@ pub fn set_tag_parent(state: &AppState, child_id: &str, parent_id: Option<String
             })
             .collect::<Vec<_>>();
         tag_policy::validate_parent_change(child_id, parent_id.as_deref(), &items)?;
-        tag_repo::update_parent(connection, child_id, parent_id.as_deref(), &clock::now_iso())
+        tag_repo::update_parent(
+            connection,
+            child_id,
+            parent_id.as_deref(),
+            &clock::now_iso(),
+        )
+    })
+}
+
+pub fn update_tag(state: &AppState, tag_id: &str, payload: UpdateTagPayload) -> AppResult<Tag> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| {
+        let current = tag_repo::get(connection, tag_id)?;
+        let name = payload
+            .name
+            .unwrap_or_else(|| current.name.clone())
+            .trim()
+            .to_string();
+        let tag_type = payload
+            .tag_type
+            .unwrap_or_else(|| current.tag_type.clone())
+            .trim()
+            .to_string();
+        tag_policy::validate_tag_name_and_type(&name, &tag_type)?;
+
+        let parent_id = payload.parent_id.unwrap_or(current.parent_id.clone());
+        if let Some(parent_id) = parent_id.as_deref() {
+            tag_repo::get(connection, parent_id)?;
+        }
+        let tags = tag_repo::list(connection)?;
+        let items = tags
+            .into_iter()
+            .map(|tag| TagHierarchyItem {
+                parent_id: if tag.id == tag_id {
+                    parent_id.clone()
+                } else {
+                    tag.parent_id
+                },
+                id: tag.id,
+            })
+            .collect::<Vec<_>>();
+        tag_policy::validate_parent_change(tag_id, parent_id.as_deref(), &items)?;
+
+        tag_repo::update(
+            connection,
+            tag_id,
+            &name,
+            parent_id.as_deref(),
+            &tag_type,
+            payload.is_topic_enabled.unwrap_or(current.is_topic_enabled),
+            &clock::now_iso(),
+        )
+        .map_err(map_tag_insert_error)
+    })
+}
+
+pub fn delete_tag(state: &AppState, tag_id: &str) -> AppResult<()> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| {
+        tag_repo::get(connection, tag_id)?;
+        if tag_repo::child_count(connection, tag_id)? > 0 {
+            return Err(AppError::Conflict("该 tag 下还有子 tag，不能删除".into()));
+        }
+        if tag_repo::file_count_for_tag(connection, tag_id)? > 0 {
+            return Err(AppError::Conflict("该 tag 仍绑定文件，不能删除".into()));
+        }
+        tag_repo::delete(connection, tag_id)
     })
 }
 
@@ -58,10 +128,12 @@ pub fn attach_tags_to_file(state: &AppState, file_id: &str, tag_ids: Vec<String>
         file_repo::get(connection, file_id)?;
         for tag_id in tag_ids {
             tag_repo::get(connection, &tag_id)?;
-            if tag_repo::file_tag_exists(connection, file_id, &tag_id)? {
-                return Err(AppError::Conflict(format!("tag {tag_id} is already attached")));
-            }
-            tag_repo::attach_to_file(connection, file_id, &tag_id, &clock::now_iso())?;
+            tag_repo::attach_to_file_ignore_existing(
+                connection,
+                file_id,
+                &tag_id,
+                &clock::now_iso(),
+            )?;
         }
         Ok(())
     })

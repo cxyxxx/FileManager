@@ -1,5 +1,10 @@
 import { command } from "../../../shared/lib/tauri";
-import type { FileRecord, SavedQuery, TagPageData } from "../../../shared/types/domain";
+import type {
+  FileRecord,
+  SavedQuery,
+  TagPageData,
+  UpdateSavedQueryPayload,
+} from "../../../shared/types/domain";
 
 export function getTagPageData(tagId: string, mode: "structure" | "aggregation") {
   return command<TagPageData>("get_tag_page_data", { tagId, mode });
@@ -15,4 +20,12 @@ export function saveQuery(payload: { name: string; tagIds: string[]; mode: "and"
 
 export function getSavedQueries() {
   return command<SavedQuery[]>("get_saved_queries");
+}
+
+export function updateSavedQuery(queryId: string, payload: UpdateSavedQueryPayload) {
+  return command<SavedQuery>("update_saved_query", { queryId, payload });
+}
+
+export function deleteSavedQuery(queryId: string) {
+  return command<void>("delete_saved_query", { queryId });
 }

@@ -3,7 +3,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use crate::app::state::AppState;
 use crate::domain::errors::{AppError, AppResult};
 use crate::domain::file::FileRecord;
-use crate::domain::query::{SaveQueryPayload, SavedQuery, TagMatchedFile, TagPageData};
+use crate::domain::query::{
+    SaveQueryPayload, SavedQuery, TagMatchedFile, TagPageData, UpdateSavedQueryPayload,
+};
 use crate::domain::tag::Tag;
 use crate::infra::{clock, ids};
 use crate::policies::aggregation_policy;
@@ -175,6 +177,27 @@ pub fn save_query(state: &AppState, payload: SaveQueryPayload) -> AppResult<Save
 pub fn get_saved_queries(state: &AppState) -> AppResult<Vec<SavedQuery>> {
     let workspace = state.workspace()?;
     workspace.with_db(query_repo::list)
+}
+
+pub fn update_saved_query(
+    state: &AppState,
+    query_id: &str,
+    payload: UpdateSavedQueryPayload,
+) -> AppResult<SavedQuery> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| {
+        let current = query_repo::get(connection, query_id)?;
+        let name = payload.name.unwrap_or(current.name).trim().to_string();
+        if name.is_empty() {
+            return Err(AppError::InvalidInput("query name is required".into()));
+        }
+        query_repo::update_name(connection, query_id, &name, &clock::now_iso())
+    })
+}
+
+pub fn delete_saved_query(state: &AppState, query_id: &str) -> AppResult<()> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| query_repo::delete(connection, query_id))
 }
 
 fn descendant_tag_ids(root_id: &str, tags: &[Tag]) -> Vec<String> {
@@ -375,6 +398,7 @@ mod tests {
             relative_path: format!("{id}.pdf"),
             size_bytes: 1,
             sha256: format!("sha-{id}"),
+            summary: None,
             status: "active".into(),
             freeze_status: "draft".into(),
             created_at: "2026-01-01T00:00:00Z".into(),

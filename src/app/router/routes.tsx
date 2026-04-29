@@ -3,6 +3,7 @@ import { FileDetailPage } from "../../pages/file/FileDetailPage";
 import { FilePage } from "../../pages/file/FilePage";
 import { InboxPage } from "../../pages/inbox/InboxPage";
 import { QueriesPage } from "../../pages/queries/QueriesPage";
+import { SearchPage } from "../../pages/search/SearchPage";
 import { SettingsPage } from "../../pages/settings/SettingsPage";
 import { TagDetailPage } from "../../pages/tag/TagDetailPage";
 import { TagPage } from "../../pages/tag/TagPage";
@@ -44,6 +45,7 @@ export const routes: AppRoute[] = [
     render: ({ tagId }) => <TagDetailPage tagId={tagId ?? ""} />,
   },
   { id: "queries", label: "Queries", path: "/queries", nav: true, render: () => <QueriesPage /> },
+  { id: "search", label: "Search", path: "/search", nav: true, render: () => <SearchPage /> },
   { id: "settings", label: "Settings", path: "/settings", nav: true, render: () => <SettingsPage /> },
 ];
 
@@ -66,6 +68,6 @@ export function matchRoute(pathname: string): RouteMatch {
   if (tagMatch) {
     return { route: routes.find((route) => route.id === "tag-detail") ?? routes[0], params: { tagId: decodeURIComponent(tagMatch[1]) } };
   }
-  const route = routes.find((item) => item.path === normalized) ?? routes[0];
+  const route = routes.find((item) => item.path === normalized.split("?")[0]) ?? routes[0];
   return { route, params: {} };
 }

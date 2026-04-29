@@ -5,6 +5,9 @@ type FileTableProps = {
   files: FileRecord[];
   emptyTitle?: string;
   emptyDescription?: string;
+  selectable?: boolean;
+  selectedIds?: string[];
+  onSelect?: (fileId: string, selected: boolean) => void;
   onOpen?: (file: FileRecord) => void;
   action?: (file: FileRecord) => ReactNode;
   tagCountLabel?: (file: FileRecord) => string;
@@ -14,6 +17,9 @@ export function FileTable({
   files,
   emptyTitle = "暂无文件",
   emptyDescription,
+  selectable = false,
+  selectedIds = [],
+  onSelect,
   onOpen,
   action,
   tagCountLabel,
@@ -31,6 +37,7 @@ export function FileTable({
     <table className="table">
       <thead>
         <tr>
+          {selectable ? <th>选择</th> : null}
           <th>文件名</th>
           <th>类型</th>
           <th>导入时间</th>
@@ -42,6 +49,16 @@ export function FileTable({
       <tbody>
         {files.map((file) => (
           <tr key={file.id}>
+            {selectable ? (
+              <td>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(file.id)}
+                  onChange={(event) => onSelect?.(file.id, event.target.checked)}
+                  aria-label={`选择 ${file.originalName}`}
+                />
+              </td>
+            ) : null}
             <td>
               {onOpen ? (
                 <button className="link-button" type="button" onClick={() => onOpen(file)}>
@@ -54,7 +71,7 @@ export function FileTable({
             </td>
             <td>{fileType(file)}</td>
             <td>{formatDate(file.createdAt)}</td>
-            <td className="muted">暂未生成</td>
+            <td className="summary-cell">{summaryPreview(file.summary)}</td>
             <td>{tagCountLabel?.(file) ?? "-"}</td>
             {action ? <td>{action(file)}</td> : null}
           </tr>
@@ -62,6 +79,15 @@ export function FileTable({
       </tbody>
     </table>
   );
+}
+
+export function summaryPreview(summary?: string | null, limit = 120) {
+  const value = summary?.trim();
+  if (!value) {
+    return "暂无摘要";
+  }
+  const chars = Array.from(value);
+  return chars.length > limit ? `${chars.slice(0, limit).join("")}...` : value;
 }
 
 function fileType(file: FileRecord) {

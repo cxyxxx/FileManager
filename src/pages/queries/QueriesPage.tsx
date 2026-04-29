@@ -1,7 +1,14 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { navigateTo } from "../../app/router/routes";
-import { getSavedQueries, queryFilesByTags, saveQuery } from "../../features/queries/api/queriesApi";
+import {
+  deleteSavedQuery,
+  getSavedQueries,
+  queryFilesByTags,
+  saveQuery,
+  updateSavedQuery,
+} from "../../features/queries/api/queriesApi";
 import { FileTable } from "../../features/files/components/FileTable";
+import { SavedQueryCard } from "../../features/queries/components/SavedQueryCard";
 import { TagPicker } from "../../features/tags/components/TagPicker";
 import { useTags } from "../../features/tags/hooks/useTags";
 import type { FileRecord, SavedQuery } from "../../shared/types/domain";
@@ -15,7 +22,9 @@ export function QueriesPage() {
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [busyQueryId, setBusyQueryId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const loadSavedQueries = useCallback(async () => {
     try {
@@ -37,6 +46,7 @@ export function QueriesPage() {
   async function runQuery(tagIds: string[], queryMode: "and" | "or") {
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
       setFiles(await queryFilesByTags(tagIds, queryMode));
     } catch (err) {
@@ -55,6 +65,7 @@ export function QueriesPage() {
     try {
       await saveQuery({ name: queryName.trim(), tagIds: selectedTagIds, mode });
       setQueryName("");
+      setNotice("查询已保存");
       await loadSavedQueries();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -67,6 +78,41 @@ export function QueriesPage() {
     setSelectedTagIds(query.tagIds);
     setMode(query.mode);
     await runQuery(query.tagIds, query.mode);
+  }
+
+  async function renameQuery(query: SavedQuery) {
+    const name = window.prompt("输入新的 saved query 名称", query.name);
+    if (!name?.trim()) {
+      return;
+    }
+    setBusyQueryId(query.id);
+    setError(null);
+    try {
+      await updateSavedQuery(query.id, { name: name.trim() });
+      setNotice("Saved query 已重命名");
+      await loadSavedQueries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyQueryId(null);
+    }
+  }
+
+  async function removeQuery(query: SavedQuery) {
+    if (!window.confirm(`确定要删除 saved query “${query.name}” 吗？`)) {
+      return;
+    }
+    setBusyQueryId(query.id);
+    setError(null);
+    try {
+      await deleteSavedQuery(query.id);
+      setNotice("Saved query 已删除");
+      await loadSavedQueries();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusyQueryId(null);
+    }
   }
 
   return (
@@ -96,6 +142,7 @@ export function QueriesPage() {
             </button>
           </div>
           {error ? <p className="error-text">操作失败：{error}</p> : null}
+          {notice ? <p className="success-text">{notice}</p> : null}
           <h3 className="subheading">查询结果</h3>
           <FileTable
             files={files}
@@ -107,12 +154,16 @@ export function QueriesPage() {
         <aside className="side-panel">
           <h3>已保存查询</h3>
           {savedQueries.length > 0 ? (
-            <div className="list-stack">
+            <div className="saved-query-list">
               {savedQueries.map((query) => (
-                <button className="list-row clickable" key={query.id} type="button" onClick={() => applySavedQuery(query)}>
-                  <span>{query.name}</span>
-                  <small>{query.mode.toUpperCase()} · {query.tagIds.length} tags</small>
-                </button>
+                <SavedQueryCard
+                  key={query.id}
+                  query={query}
+                  busy={busyQueryId === query.id}
+                  onRun={(item) => void applySavedQuery(item)}
+                  onRename={(item) => void renameQuery(item)}
+                  onDelete={(item) => void removeQuery(item)}
+                />
               ))}
             </div>
           ) : (

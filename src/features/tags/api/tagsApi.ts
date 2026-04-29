@@ -1,5 +1,5 @@
 import { command } from "../../../shared/lib/tauri";
-import type { Tag } from "../../../shared/types/domain";
+import type { Tag, UpdateTagPayload } from "../../../shared/types/domain";
 
 export type CreateTagPayload = {
   name: string;
@@ -18,4 +18,12 @@ export function listTags() {
 
 export function setTagParent(childId: string, parentId?: string | null) {
   return command<Tag>("set_tag_parent", { childId, parentId: parentId ?? null });
+}
+
+export function updateTag(tagId: string, payload: UpdateTagPayload) {
+  return command<Tag>("update_tag", { tagId, payload });
+}
+
+export function deleteTag(tagId: string) {
+  return command<void>("delete_tag", { tagId });
 }

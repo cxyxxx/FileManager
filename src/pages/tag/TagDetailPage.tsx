@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { navigateTo } from "../../app/router/routes";
 import { getTagPageData } from "../../features/queries/api/queriesApi";
-import { FileTable, formatDate } from "../../features/files/components/FileTable";
+import { FileTable, formatDate, summaryPreview } from "../../features/files/components/FileTable";
 import { TagBadge } from "../../features/tags/components/TagBadge";
 import type { TagPageData } from "../../shared/types/domain";
 
@@ -125,6 +125,7 @@ function AggregationView({ data }: { data: TagPageData }) {
       {data.aggregateFiles.map(({ file, matchedTags }) => (
         <button className="file-card" key={file.id} type="button" onClick={() => navigateTo(`/files/${encodeURIComponent(file.id)}`)}>
           <strong>{file.originalName}</strong>
+          <p>{summaryPreview(file.summary)}</p>
           <span>{formatDate(file.createdAt)}</span>
           <div className="badge-row">
             {matchedTags.map((tag) => (

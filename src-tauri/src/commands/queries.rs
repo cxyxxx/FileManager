@@ -3,7 +3,7 @@ use tauri::State;
 use crate::app::state::AppState;
 use crate::domain::errors::AppResult;
 use crate::domain::file::FileRecord;
-use crate::domain::query::{SaveQueryPayload, SavedQuery, TagPageData};
+use crate::domain::query::{SaveQueryPayload, SavedQuery, TagPageData, UpdateSavedQueryPayload};
 use crate::services::query_service;
 
 #[tauri::command]
@@ -37,4 +37,18 @@ pub fn save_query(payload: SaveQueryPayload, state: State<'_, AppState>) -> AppR
 #[tauri::command]
 pub fn get_saved_queries(state: State<'_, AppState>) -> AppResult<Vec<SavedQuery>> {
     query_service::get_saved_queries(&state)
+}
+
+#[tauri::command]
+pub fn update_saved_query(
+    query_id: String,
+    payload: UpdateSavedQueryPayload,
+    state: State<'_, AppState>,
+) -> AppResult<SavedQuery> {
+    query_service::update_saved_query(&state, &query_id, payload)
+}
+
+#[tauri::command]
+pub fn delete_saved_query(query_id: String, state: State<'_, AppState>) -> AppResult<()> {
+    query_service::delete_saved_query(&state, &query_id)
 }

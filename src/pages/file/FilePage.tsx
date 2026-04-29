@@ -1,15 +1,23 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { navigateTo } from "../../app/router/routes";
-import { importFiles, listFiles } from "../../features/files/api/filesApi";
+import { archiveFile, importFiles, listFiles, restoreFile } from "../../features/files/api/filesApi";
+import { FilePickerDropzone } from "../../features/files/components/FilePickerDropzone";
 import { FileTable } from "../../features/files/components/FileTable";
+import { ImportResultPanel, type ImportResultItem } from "../../features/files/components/ImportResultPanel";
 import type { FileRecord } from "../../shared/types/domain";
+
+type FileFilter = "active" | "archived" | "all";
 
 export function FilePage() {
   const [pathsText, setPathsText] = useState("");
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [recentImported, setRecentImported] = useState<FileRecord[]>([]);
+  const [importResults, setImportResults] = useState<ImportResultItem[]>([]);
+  const [filter, setFilter] = useState<FileFilter>("active");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [actingId, setActingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -17,26 +25,21 @@ export function FilePage() {
     setLoading(true);
     setError(null);
     try {
-      setFiles(await listFiles());
+      setFiles(await listFiles({ includeArchived: filter === "all", archivedOnly: filter === "archived" }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filter]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  async function onImport(event: FormEvent) {
-    event.preventDefault();
+  async function importPathList(paths: string[]) {
     setError(null);
     setNotice(null);
-    const paths = pathsText
-      .split(/\r?\n/)
-      .map((path) => path.trim())
-      .filter(Boolean);
     if (paths.length === 0) {
       return;
     }
@@ -44,13 +47,45 @@ export function FilePage() {
     try {
       const imported = await importFiles(paths);
       setRecentImported(imported);
+      setImportResults(imported.map((file) => ({ name: file.originalName, status: "success", file })));
       setNotice(`导入成功：${imported.length} 个文件`);
       setPathsText("");
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setImportResults(paths.map((path) => ({ name: path, status: "failed", reason: message })));
+      setError(message);
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function onImport(event: FormEvent) {
+    event.preventDefault();
+    const paths = pathsText
+      .split(/\r?\n/)
+      .map((path) => path.trim())
+      .filter(Boolean);
+    await importPathList(paths);
+  }
+
+  async function toggleArchive(file: FileRecord) {
+    if (file.status !== "archived" && !window.confirm("确定要归档这个文件吗？\n归档后它将不再出现在 Inbox 和常规文件列表中。")) {
+      return;
+    }
+    setActingId(file.id);
+    setError(null);
+    try {
+      if (file.status === "archived") {
+        await restoreFile(file.id);
+      } else {
+        await archiveFile(file.id);
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActingId(null);
     }
   }
 
@@ -58,33 +93,47 @@ export function FilePage() {
     <section className="panel">
       <div className="section-heading">
         <h2>导入文件</h2>
-        <p>每行一个本地文件路径。</p>
+        <p>选择或拖拽本地文件，导入后会先进入 Inbox 等待整理。</p>
       </div>
-      <form className="import-form" onSubmit={onImport}>
-        <textarea
-          className="textarea"
-          value={pathsText}
-          onChange={(event) => setPathsText(event.target.value)}
-          placeholder="/Users/xin/Desktop/RAG 系统设计方案.pdf"
-        />
-        <div className="toolbar">
-          <button className="button" type="submit" disabled={importing}>
-            {importing ? "导入中..." : "导入"}
-          </button>
-          <button className="button secondary" type="button" onClick={refresh}>
-            刷新列表
-          </button>
-        </div>
-      </form>
+      <FilePickerDropzone disabled={importing} onImport={(paths) => void importPathList(paths)} />
+      <details className="advanced-import" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
+        <summary>高级 / 调试导入</summary>
+        <form className="import-form" onSubmit={onImport}>
+          <textarea
+            className="textarea"
+            value={pathsText}
+            onChange={(event) => setPathsText(event.target.value)}
+            placeholder="/Users/xin/Desktop/RAG 系统设计方案.pdf"
+          />
+          <div className="toolbar">
+            <button className="button" type="submit" disabled={importing}>
+              {importing ? "导入中..." : "导入路径"}
+            </button>
+          </div>
+        </form>
+      </details>
       {notice ? <p className="success-text">{notice}</p> : null}
       {error ? <p className="error-text">导入失败：{error}</p> : null}
+      <ImportResultPanel items={importResults} />
       {recentImported.length > 0 ? (
         <>
           <h3 className="subheading">最近导入</h3>
           <FileTable files={recentImported} onOpen={(file) => navigateTo(`/files/${encodeURIComponent(file.id)}`)} />
         </>
       ) : null}
-      <h3 className="subheading">文件列表</h3>
+      <div className="section-title-row list-heading-row">
+        <h3 className="subheading">文件列表</h3>
+        <div className="toolbar compact-actions">
+          <select className="input compact-input" value={filter} onChange={(event) => setFilter(event.target.value as FileFilter)}>
+            <option value="active">活跃文件</option>
+            <option value="archived">已归档文件</option>
+            <option value="all">全部文件</option>
+          </select>
+          <button className="button secondary" type="button" onClick={refresh}>
+            刷新列表
+          </button>
+        </div>
+      </div>
       {loading ? <p className="empty-state">正在加载文件...</p> : null}
       {!loading ? (
         <FileTable
@@ -92,6 +141,11 @@ export function FilePage() {
           emptyTitle="暂无文件"
           emptyDescription="导入文件后，它们会先进入 Inbox。"
           onOpen={(file) => navigateTo(`/files/${encodeURIComponent(file.id)}`)}
+          action={(file) => (
+            <button className={file.status === "archived" ? "button secondary small" : "button danger small"} type="button" disabled={actingId === file.id} onClick={() => void toggleArchive(file)}>
+              {file.status === "archived" ? "恢复" : "归档"}
+            </button>
+          )}
         />
       ) : null}
     </section>

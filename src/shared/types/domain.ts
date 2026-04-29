@@ -18,8 +18,11 @@ export type FileRecord = {
   storedName: string;
   sourcePath: string | null;
   relativePath: string;
+  extension?: string;
+  mimeType?: string;
   sizeBytes: number;
   sha256: string;
+  summary?: string | null;
   status: string;
   freezeStatus: string;
   createdAt: string;
@@ -29,6 +32,7 @@ export type FileRecord = {
 export type FilePageData = {
   file: FileRecord;
   tags: Tag[];
+  versions: VersionNode[];
 };
 
 export type Tag = {
@@ -53,10 +57,51 @@ export type VersionNode = {
 export type SavedQuery = {
   id: string;
   name: string;
+  queryType?: "tag" | "keyword";
+  payload?: SavedQueryPayload;
   mode: "and" | "or";
   tagIds: string[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type SavedQueryPayload =
+  | {
+      tagIds: string[];
+      mode: "and" | "or";
+    }
+  | {
+      keyword: string;
+      tagIds?: string[];
+      includeArchived?: boolean;
+    };
+
+export type SearchFilesOptions = {
+  tagIds?: string[];
+  fileTypes?: string[];
+  includeArchived?: boolean;
+};
+
+export type FileSearchResult = {
+  file: FileRecord;
+  matchedTags: Tag[];
+  matchedFields: Array<"fileName" | "summary" | "tag">;
+  highlight?: {
+    fileName?: string;
+    summary?: string;
+    tags?: string[];
+  };
+};
+
+export type UpdateTagPayload = {
+  name?: string;
+  parentId?: string | null;
+  tagType?: string;
+  isTopicEnabled?: boolean;
+};
+
+export type UpdateSavedQueryPayload = {
+  name?: string;
 };
 
 export type TagMatchedFile = {

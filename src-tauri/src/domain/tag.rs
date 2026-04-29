@@ -20,3 +20,12 @@ pub struct CreateTagPayload {
     pub parent_id: Option<String>,
     pub is_topic_enabled: Option<bool>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateTagPayload {
+    pub name: Option<String>,
+    pub parent_id: Option<Option<String>>,
+    pub tag_type: Option<String>,
+    pub is_topic_enabled: Option<bool>,
+}

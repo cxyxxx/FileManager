@@ -106,6 +106,7 @@ fn copy_derived_file(
         relative_path: fs::relative_files_path(&year, &month, &safe_name_with_id(&destination)),
         size_bytes: metadata.len() as i64,
         sha256: hashing::sha256_file(&destination)?,
+        summary: None,
         status: FileStatus::Active.as_str().into(),
         freeze_status: FreezeStatus::Draft.as_str().into(),
         created_at: now.clone(),
@@ -120,7 +121,10 @@ fn safe_name_with_id(path: &PathBuf) -> String {
         .to_string()
 }
 
-fn ensure_version_node(connection: &rusqlite::Connection, source: &FileRecord) -> AppResult<VersionNode> {
+fn ensure_version_node(
+    connection: &rusqlite::Connection,
+    source: &FileRecord,
+) -> AppResult<VersionNode> {
     if let Some(node) = version_repo::find_node_by_file(connection, &source.id)? {
         return Ok(node);
     }

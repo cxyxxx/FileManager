@@ -115,6 +115,36 @@ pub fn update_parent(
     get(connection, child_id)
 }
 
+pub fn update(
+    connection: &Connection,
+    tag_id: &str,
+    name: &str,
+    parent_id: Option<&str>,
+    tag_type: &str,
+    is_topic_enabled: bool,
+    updated_at: &str,
+) -> AppResult<Tag> {
+    let affected = connection.execute(
+        r#"
+        UPDATE tags
+        SET name = ?1, parent_id = ?2, tag_type = ?3, is_topic_enabled = ?4, updated_at = ?5
+        WHERE id = ?6
+        "#,
+        params![
+            name,
+            parent_id,
+            tag_type,
+            bool_to_int(is_topic_enabled),
+            updated_at,
+            tag_id
+        ],
+    )?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("tag {tag_id}")));
+    }
+    get(connection, tag_id)
+}
+
 pub fn attach_to_file(
     connection: &Connection,
     file_id: &str,
@@ -125,6 +155,58 @@ pub fn attach_to_file(
         "INSERT INTO file_tags (file_id, tag_id, created_at) VALUES (?1, ?2, ?3)",
         params![file_id, tag_id, created_at],
     )?;
+    Ok(())
+}
+
+pub fn attach_to_file_ignore_existing(
+    connection: &Connection,
+    file_id: &str,
+    tag_id: &str,
+    created_at: &str,
+) -> AppResult<()> {
+    connection.execute(
+        "INSERT OR IGNORE INTO file_tags (file_id, tag_id, created_at) VALUES (?1, ?2, ?3)",
+        params![file_id, tag_id, created_at],
+    )?;
+    Ok(())
+}
+
+pub fn replace_for_file(
+    connection: &Connection,
+    file_id: &str,
+    tag_ids: &[String],
+    created_at: &str,
+) -> AppResult<()> {
+    connection.execute("DELETE FROM file_tags WHERE file_id = ?1", params![file_id])?;
+    for tag_id in tag_ids {
+        attach_to_file_ignore_existing(connection, file_id, tag_id, created_at)?;
+    }
+    Ok(())
+}
+
+pub fn file_count_for_tag(connection: &Connection, tag_id: &str) -> AppResult<usize> {
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM file_tags WHERE tag_id = ?1",
+        params![tag_id],
+        |row| row.get(0),
+    )?;
+    Ok(count as usize)
+}
+
+pub fn child_count(connection: &Connection, tag_id: &str) -> AppResult<usize> {
+    let count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM tags WHERE parent_id = ?1",
+        params![tag_id],
+        |row| row.get(0),
+    )?;
+    Ok(count as usize)
+}
+
+pub fn delete(connection: &Connection, tag_id: &str) -> AppResult<()> {
+    let affected = connection.execute("DELETE FROM tags WHERE id = ?1", params![tag_id])?;
+    if affected == 0 {
+        return Err(AppError::NotFound(format!("tag {tag_id}")));
+    }
     Ok(())
 }
 

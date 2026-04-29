@@ -1,20 +1,31 @@
 import { useCallback, useEffect, useState } from "react";
 import { navigateTo } from "../../app/router/routes";
-import { attachTagsToFile, getFilePageData } from "../../features/files/api/filesApi";
+import {
+  archiveFile,
+  getFilePageData,
+  openFile,
+  revealFile,
+  restoreFile,
+  setFileTags,
+  updateFileSummary,
+} from "../../features/files/api/filesApi";
+import { EditableTagList } from "../../features/files/components/EditableTagList";
+import { FileActionMenu } from "../../features/files/components/FileActionMenu";
 import { formatBytes, formatDate } from "../../features/files/components/FileTable";
-import { TagBadge } from "../../features/tags/components/TagBadge";
-import { TagPicker } from "../../features/tags/components/TagPicker";
+import { SummaryEditor } from "../../features/files/components/SummaryEditor";
 import { useTags } from "../../features/tags/hooks/useTags";
-import { getVersionChain } from "../../features/versions/api/versionsApi";
-import type { FilePageData, VersionNode } from "../../shared/types/domain";
+import type { FilePageData } from "../../shared/types/domain";
 
 export function FileDetailPage({ fileId }: { fileId: string }) {
   const [data, setData] = useState<FilePageData | null>(null);
-  const [versions, setVersions] = useState<VersionNode[]>([]);
-  const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingSummary, setSavingSummary] = useState(false);
+  const [savingTags, setSavingTags] = useState(false);
+  const [acting, setActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [tagError, setTagError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const { tags } = useTags();
 
   const load = useCallback(async () => {
@@ -28,7 +39,6 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
     try {
       const pageData = await getFilePageData(fileId);
       setData(pageData);
-      setVersions(await getVersionChain(fileId).catch(() => []));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -40,24 +50,52 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
     load();
   }, [load]);
 
-  async function saveTags() {
-    if (selectedTagIds.length === 0) {
-      return;
-    }
-    setSaving(true);
-    setError(null);
+  async function saveSummary(summary: string) {
+    setSavingSummary(true);
+    setSummaryError(null);
     try {
-      await attachTagsToFile(fileId, selectedTagIds);
-      setSelectedTagIds([]);
-      await load();
+      setData(await updateFileSummary(fileId, summary));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setSummaryError(err instanceof Error ? err.message : String(err));
+      throw err;
     } finally {
-      setSaving(false);
+      setSavingSummary(false);
     }
   }
 
-  const attachedIds = data?.tags.map((tag) => tag.id) ?? [];
+  async function saveTags(tagIds: string[]) {
+    setSavingTags(true);
+    setTagError(null);
+    try {
+      setData(await setFileTags(fileId, tagIds));
+    } catch (err) {
+      setTagError(err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      setSavingTags(false);
+    }
+  }
+
+  async function runAction(action: () => Promise<void>, success?: () => void | Promise<void>) {
+    setActing(true);
+    setActionError(null);
+    try {
+      await action();
+      await success?.();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActing(false);
+    }
+  }
+
+  function confirmArchive() {
+    const confirmed = window.confirm("确定要归档这个文件吗？\n归档后它将不再出现在 Inbox 和常规文件列表中。");
+    if (!confirmed) {
+      return;
+    }
+    void runAction(() => archiveFile(fileId), () => navigateTo("/files"));
+  }
 
   return (
     <section className="panel">
@@ -90,21 +128,24 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
               <dt>SHA256</dt>
               <dd>{data.file.sha256}</dd>
             </dl>
+            <SummaryEditor summary={data.file.summary} saving={savingSummary} error={summaryError} onSave={saveSummary} />
+            <EditableTagList allTags={tags} attachedTags={data.tags} saving={savingTags} error={tagError} onSave={saveTags} />
           </div>
           <aside className="side-panel">
-            <h3>当前 tags</h3>
-            <div className="badge-row">
-              {data.tags.length > 0 ? data.tags.map((tag) => <TagBadge key={tag.id} tag={tag} />) : <span className="muted">暂无 tag</span>}
-            </div>
-            <h3>添加 tag</h3>
-            <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} disabledIds={attachedIds} />
-            <button className="button full-width" type="button" disabled={saving || selectedTagIds.length === 0} onClick={saveTags}>
-              {saving ? "保存中..." : "添加 tag"}
-            </button>
+            <h3>文件操作</h3>
+            <FileActionMenu
+              archived={data.file.status === "archived"}
+              busy={acting}
+              onOpen={() => void runAction(() => openFile(fileId))}
+              onReveal={() => void runAction(() => revealFile(fileId))}
+              onArchive={confirmArchive}
+              onRestore={() => void runAction(() => restoreFile(fileId), load)}
+            />
+            {actionError ? <p className="error-text">操作失败：{actionError}</p> : null}
             <h3>版本信息</h3>
-            {versions.length > 0 ? (
+            {data.versions.length > 0 ? (
               <div className="version-list">
-                {versions.map((version) => (
+                {data.versions.map((version) => (
                   <button
                     className={version.fileId === fileId ? "version-item active" : "version-item"}
                     key={version.id}
