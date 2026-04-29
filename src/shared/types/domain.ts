@@ -54,8 +54,18 @@ export type SavedQuery = {
   updatedAt: string;
 };
 
+export type TagMatchedFile = {
+  file: FileRecord;
+  matchedTags: Tag[];
+};
+
 export type TagPageData = {
   tag: Tag;
+  children: Tag[];
   directFiles: FileRecord[];
-  aggregateFiles: FileRecord[];
+  aggregateFiles: TagMatchedFile[];
+  descendantTags: Tag[];
+  totalDirectFileCount: number;
+  totalAggregateFileCount: number | null;
+  mode: "structure" | "aggregation";
 };

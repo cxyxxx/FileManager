@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Row};
 
 use crate::domain::errors::{AppError, AppResult};
 use crate::domain::tag::Tag;
@@ -38,7 +38,47 @@ pub fn find(connection: &Connection, tag_id: &str) -> AppResult<Option<Tag>> {
 pub fn list(connection: &Connection) -> AppResult<Vec<Tag>> {
     let mut statement = connection.prepare("SELECT * FROM tags ORDER BY tag_type, name")?;
     let rows = statement.query_map([], map_tag)?;
-    let tags = rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)?;
+    let tags = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)?;
+    Ok(tags)
+}
+
+pub fn list_children(connection: &Connection, parent_id: &str) -> AppResult<Vec<Tag>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT *
+        FROM tags
+        WHERE parent_id = ?1
+        ORDER BY tag_type, name
+        "#,
+    )?;
+    let rows = statement.query_map(params![parent_id], map_tag)?;
+    let tags = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)?;
+    Ok(tags)
+}
+
+pub fn list_by_ids(connection: &Connection, tag_ids: &[String]) -> AppResult<Vec<Tag>> {
+    if tag_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let placeholders = vec!["?"; tag_ids.len()].join(", ");
+    let sql = format!(
+        r#"
+        SELECT *
+        FROM tags
+        WHERE id IN ({placeholders})
+        ORDER BY tag_type, name
+        "#
+    );
+    let mut statement = connection.prepare(&sql)?;
+    let rows = statement.query_map(params_from_iter(tag_ids), map_tag)?;
+    let tags = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)?;
     Ok(tags)
 }
 
@@ -58,7 +98,12 @@ pub fn update_parent(
     get(connection, child_id)
 }
 
-pub fn attach_to_file(connection: &Connection, file_id: &str, tag_id: &str, created_at: &str) -> AppResult<()> {
+pub fn attach_to_file(
+    connection: &Connection,
+    file_id: &str,
+    tag_id: &str,
+    created_at: &str,
+) -> AppResult<()> {
     connection.execute(
         "INSERT INTO file_tags (file_id, tag_id, created_at) VALUES (?1, ?2, ?3)",
         params![file_id, tag_id, created_at],

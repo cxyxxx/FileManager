@@ -3,8 +3,8 @@ use tauri::State;
 use crate::app::state::AppState;
 use crate::domain::errors::AppResult;
 use crate::domain::file::FileRecord;
-use crate::domain::query::{SaveQueryPayload, SavedQuery};
-use crate::services::query_service::{self, TagPageData};
+use crate::domain::query::{SaveQueryPayload, SavedQuery, TagPageData};
+use crate::services::query_service;
 
 #[tauri::command]
 pub fn get_inbox_files(state: State<'_, AppState>) -> AppResult<Vec<FileRecord>> {
