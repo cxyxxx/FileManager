@@ -1,3 +1,4 @@
+pub mod file_content_repo;
 pub mod file_repo;
 pub mod query_repo;
 pub mod tag_repo;

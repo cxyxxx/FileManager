@@ -2,28 +2,35 @@ import { useCallback, useEffect, useState } from "react";
 import { navigateTo } from "../../app/router/routes";
 import {
   archiveFile,
+  generateFileSummary,
   getFilePageData,
   openFile,
   revealFile,
   restoreFile,
   setFileTags,
+  suggestTagsForFile,
   updateFileSummary,
 } from "../../features/files/api/filesApi";
 import { EditableTagList } from "../../features/files/components/EditableTagList";
 import { FileActionMenu } from "../../features/files/components/FileActionMenu";
+import { FileContentPanel } from "../../features/files/components/FileContentPanel";
+import { FilePreviewPanel } from "../../features/files/components/FilePreviewPanel";
 import { formatBytes, formatDate } from "../../features/files/components/FileTable";
 import { SummaryEditor } from "../../features/files/components/SummaryEditor";
 import { useTags } from "../../features/tags/hooks/useTags";
-import type { FilePageData } from "../../shared/types/domain";
+import type { FilePageData, TagSuggestion } from "../../shared/types/domain";
 
 export function FileDetailPage({ fileId }: { fileId: string }) {
   const [data, setData] = useState<FilePageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingSummary, setSavingSummary] = useState(false);
+  const [generatingSummary, setGeneratingSummary] = useState(false);
   const [savingTags, setSavingTags] = useState(false);
   const [acting, setActing] = useState(false);
+  const [suggestions, setSuggestions] = useState<TagSuggestion[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [tagError, setTagError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const { tags } = useTags();
@@ -39,6 +46,7 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
     try {
       const pageData = await getFilePageData(fileId);
       setData(pageData);
+      setSuggestions(await suggestTagsForFile(fileId));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -63,11 +71,26 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
     }
   }
 
+  async function generateSummary() {
+    setGeneratingSummary(true);
+    setGenerateError(null);
+    try {
+      const next = await generateFileSummary(fileId);
+      setData(next);
+      setSuggestions(await suggestTagsForFile(fileId));
+    } catch (err) {
+      setGenerateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setGeneratingSummary(false);
+    }
+  }
+
   async function saveTags(tagIds: string[]) {
     setSavingTags(true);
     setTagError(null);
     try {
       setData(await setFileTags(fileId, tagIds));
+      setSuggestions(await suggestTagsForFile(fileId));
     } catch (err) {
       setTagError(err instanceof Error ? err.message : String(err));
       throw err;
@@ -128,8 +151,18 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
               <dt>SHA256</dt>
               <dd>{data.file.sha256}</dd>
             </dl>
-            <SummaryEditor summary={data.file.summary} saving={savingSummary} error={summaryError} onSave={saveSummary} />
-            <EditableTagList allTags={tags} attachedTags={data.tags} saving={savingTags} error={tagError} onSave={saveTags} />
+            <SummaryEditor
+              summary={data.file.summary}
+              saving={savingSummary}
+              error={summaryError}
+              onSave={saveSummary}
+              onGenerate={generateSummary}
+              generating={generatingSummary}
+              generateError={generateError}
+            />
+            <EditableTagList allTags={tags} attachedTags={data.tags} suggestions={suggestions} saving={savingTags} error={tagError} onSave={saveTags} />
+            <FileContentPanel fileId={fileId} onExtracted={async () => setSuggestions(await suggestTagsForFile(fileId))} />
+            <FilePreviewPanel fileId={fileId} />
           </div>
           <aside className="side-panel">
             <h3>文件操作</h3>

@@ -2,6 +2,7 @@ import { command } from "../../../shared/lib/tauri";
 import type {
   FileRecord,
   SavedQuery,
+  SavedQueryPayload,
   TagPageData,
   UpdateSavedQueryPayload,
 } from "../../../shared/types/domain";
@@ -14,7 +15,7 @@ export function queryFilesByTags(tagIds: string[], mode: "and" | "or") {
   return command<FileRecord[]>("query_files_by_tags", { tagIds, mode });
 }
 
-export function saveQuery(payload: { name: string; tagIds: string[]; mode: "and" | "or" }) {
+export function saveQuery(payload: { name: string; tagIds: string[]; mode: "and" | "or" } | { name: string; queryType: "keyword"; payload: SavedQueryPayload }) {
   return command<SavedQuery>("save_query", { payload });
 }
 

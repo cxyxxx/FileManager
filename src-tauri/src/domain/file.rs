@@ -28,6 +28,23 @@ pub struct FilePageData {
     pub versions: Vec<VersionNode>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBatchResult {
+    pub items: Vec<ImportResultItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResultItem {
+    pub path: String,
+    pub original_name: Option<String>,
+    pub status: String,
+    pub file: Option<FileRecord>,
+    pub reason: Option<String>,
+    pub duplicate_of: Option<FileRecord>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListFilesOptions {
@@ -38,6 +55,7 @@ pub struct ListFilesOptions {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchFilesOptions {
+    pub scopes: Option<Vec<String>>,
     pub tag_ids: Option<Vec<String>>,
     pub file_types: Option<Vec<String>>,
     pub include_archived: Option<bool>,
@@ -57,7 +75,38 @@ pub struct FileSearchResult {
 pub struct SearchHighlight {
     pub file_name: Option<String>,
     pub summary: Option<String>,
+    pub content: Option<String>,
     pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileContent {
+    pub file_id: String,
+    pub content_text: Option<String>,
+    pub extraction_status: String,
+    pub extraction_error: Option<String>,
+    pub extracted_at: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePreview {
+    pub file_id: String,
+    pub preview_type: String,
+    pub text: Option<String>,
+    pub image_url: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagSuggestion {
+    pub tag: Tag,
+    pub score: usize,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

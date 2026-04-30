@@ -25,7 +25,7 @@ export function SearchResultList({ results, loading = false, searched = false }:
     return (
       <div className="empty-block">
         <strong>输入关键词开始搜索</strong>
-        <span>搜索范围包括文件名、摘要和 tag 名。</span>
+        <span>搜索范围包括文件名、摘要、tag 名和已抽取正文。</span>
       </div>
     );
   }

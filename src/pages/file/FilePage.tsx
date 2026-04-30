@@ -1,10 +1,10 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { navigateTo } from "../../app/router/routes";
-import { archiveFile, importFiles, listFiles, restoreFile } from "../../features/files/api/filesApi";
+import { archiveFile, extractFileContent, importFiles, listFiles, restoreFile } from "../../features/files/api/filesApi";
 import { FilePickerDropzone } from "../../features/files/components/FilePickerDropzone";
 import { FileTable } from "../../features/files/components/FileTable";
-import { ImportResultPanel, type ImportResultItem } from "../../features/files/components/ImportResultPanel";
-import type { FileRecord } from "../../shared/types/domain";
+import { ImportResultPanel } from "../../features/files/components/ImportResultPanel";
+import type { FileRecord, ImportResultItem } from "../../shared/types/domain";
 
 type FileFilter = "active" | "archived" | "all";
 
@@ -45,15 +45,22 @@ export function FilePage() {
     }
     setImporting(true);
     try {
-      const imported = await importFiles(paths);
+      const batch = await importFiles(paths);
+      const imported = batch.items.flatMap((item) => item.file ? [item.file] : []);
       setRecentImported(imported);
-      setImportResults(imported.map((file) => ({ name: file.originalName, status: "success", file })));
-      setNotice(`导入成功：${imported.length} 个文件`);
+      setImportResults(batch.items);
+      const failed = batch.items.filter((item) => item.status === "failed").length;
+      const duplicates = batch.items.filter((item) => item.status === "duplicate").length;
+      const autoExtract = window.localStorage.getItem("filesManager.autoExtractContent") === "true";
+      if (autoExtract && imported.length > 0) {
+        await Promise.allSettled(imported.map((file) => extractFileContent(file.id)));
+      }
+      setNotice(`导入完成：成功 ${imported.length} 个，失败 ${failed} 个，重复 ${duplicates} 个${autoExtract ? "；已尝试自动抽取正文" : ""}`);
       setPathsText("");
       await refresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      setImportResults(paths.map((path) => ({ name: path, status: "failed", reason: message })));
+      setImportResults(paths.map((path) => ({ path, status: "failed", reason: message })));
       setError(message);
     } finally {
       setImporting(false);

@@ -1,19 +1,24 @@
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use crate::domain::errors::{AppError, AppResult};
-use crate::domain::query::SavedQuery;
+use crate::domain::query::{SavedQuery, SavedQueryPayload, TagQueryPayload};
 
 pub fn insert(connection: &Connection, query: &SavedQuery) -> AppResult<()> {
     connection.execute(
         r#"
-        INSERT INTO saved_queries (id, name, mode, tag_ids_json, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        INSERT INTO saved_queries (
+          id, name, mode, tag_ids_json, query_type, payload_json, created_at, updated_at
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
         "#,
         params![
             query.id,
             query.name,
             query.mode,
             serde_json::to_string(&query.tag_ids)
+                .map_err(|err| AppError::Internal(err.to_string()))?,
+            query.query_type,
+            serde_json::to_string(&query.payload)
                 .map_err(|err| AppError::Internal(err.to_string()))?,
             query.created_at,
             query.updated_at
@@ -70,11 +75,27 @@ pub fn delete(connection: &Connection, query_id: &str) -> AppResult<()> {
 
 fn map_saved_query(row: &Row<'_>) -> rusqlite::Result<SavedQuery> {
     let tag_ids_json: String = row.get("tag_ids_json")?;
-    let tag_ids = serde_json::from_str(&tag_ids_json).unwrap_or_default();
+    let tag_ids: Vec<String> = serde_json::from_str(&tag_ids_json).unwrap_or_default();
+    let mode: String = row.get("mode")?;
+    let query_type: String = row
+        .get::<_, Option<String>>("query_type")?
+        .unwrap_or_else(|| "tag".into());
+    let payload_json: Option<String> = row.get("payload_json")?;
+    let payload = payload_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<SavedQueryPayload>(json).ok())
+        .unwrap_or_else(|| {
+            SavedQueryPayload::Tag(TagQueryPayload {
+                tag_ids: tag_ids.clone(),
+                mode: mode.clone(),
+            })
+        });
     Ok(SavedQuery {
         id: row.get("id")?,
         name: row.get("name")?,
-        mode: row.get("mode")?,
+        query_type,
+        payload,
+        mode,
         tag_ids,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,

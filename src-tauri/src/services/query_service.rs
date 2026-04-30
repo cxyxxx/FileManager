@@ -4,7 +4,8 @@ use crate::app::state::AppState;
 use crate::domain::errors::{AppError, AppResult};
 use crate::domain::file::FileRecord;
 use crate::domain::query::{
-    SaveQueryPayload, SavedQuery, TagMatchedFile, TagPageData, UpdateSavedQueryPayload,
+    SaveQueryPayload, SavedQuery, SavedQueryPayload, TagMatchedFile, TagPageData, TagQueryPayload,
+    UpdateSavedQueryPayload,
 };
 use crate::domain::tag::Tag;
 use crate::infra::{clock, ids};
@@ -149,23 +150,48 @@ pub fn save_query(state: &AppState, payload: SaveQueryPayload) -> AppResult<Save
     if payload.name.trim().is_empty() {
         return Err(AppError::InvalidInput("query name is required".into()));
     }
-    if !matches!(payload.mode.as_str(), "and" | "or") {
-        return Err(AppError::InvalidInput(
-            "query mode must be and or or".into(),
-        ));
-    }
 
     let workspace = state.workspace()?;
     workspace.with_db(|connection| {
-        for tag_id in &payload.tag_ids {
-            tag_repo::get(connection, tag_id)?;
-        }
+        let query_payload = normalize_saved_query_payload(&payload)?;
+        let (query_type, mode, tag_ids) = match &query_payload {
+            SavedQueryPayload::Tag(tag_payload) => {
+                if !matches!(tag_payload.mode.as_str(), "and" | "or") {
+                    return Err(AppError::InvalidInput(
+                        "query mode must be and or or".into(),
+                    ));
+                }
+                for tag_id in &tag_payload.tag_ids {
+                    tag_repo::get(connection, tag_id)?;
+                }
+                (
+                    "tag".to_string(),
+                    tag_payload.mode.clone(),
+                    tag_payload.tag_ids.clone(),
+                )
+            }
+            SavedQueryPayload::Keyword(keyword_payload) => {
+                if keyword_payload.keyword.trim().is_empty() {
+                    return Err(AppError::InvalidInput("keyword is required".into()));
+                }
+                for tag_id in keyword_payload.tag_ids.as_deref().unwrap_or_default() {
+                    tag_repo::get(connection, tag_id)?;
+                }
+                (
+                    "keyword".to_string(),
+                    "and".to_string(),
+                    keyword_payload.tag_ids.clone().unwrap_or_default(),
+                )
+            }
+        };
         let now = clock::now_iso();
         let query = SavedQuery {
             id: ids::new_id(),
             name: payload.name.trim().into(),
-            mode: payload.mode,
-            tag_ids: payload.tag_ids,
+            query_type,
+            payload: query_payload,
+            mode,
+            tag_ids,
             created_at: now.clone(),
             updated_at: now,
         };
@@ -198,6 +224,25 @@ pub fn update_saved_query(
 pub fn delete_saved_query(state: &AppState, query_id: &str) -> AppResult<()> {
     let workspace = state.workspace()?;
     workspace.with_db(|connection| query_repo::delete(connection, query_id))
+}
+
+fn normalize_saved_query_payload(payload: &SaveQueryPayload) -> AppResult<SavedQueryPayload> {
+    if let Some(query_payload) = payload.payload.clone() {
+        return Ok(query_payload);
+    }
+
+    match payload.query_type.as_deref().unwrap_or("tag") {
+        "tag" => Ok(SavedQueryPayload::Tag(TagQueryPayload {
+            tag_ids: payload.tag_ids.clone().unwrap_or_default(),
+            mode: payload.mode.clone().unwrap_or_else(|| "and".into()),
+        })),
+        "keyword" => Err(AppError::InvalidInput(
+            "keyword saved query payload is required".into(),
+        )),
+        _ => Err(AppError::InvalidInput(
+            "queryType must be tag or keyword".into(),
+        )),
+    }
 }
 
 fn descendant_tag_ids(root_id: &str, tags: &[Tag]) -> Vec<String> {

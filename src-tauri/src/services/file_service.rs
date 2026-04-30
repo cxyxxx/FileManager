@@ -1,28 +1,65 @@
 use std::collections::HashSet;
+use std::fs as std_fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::app::state::{AppState, WorkspaceContext};
 use crate::domain::errors::{AppError, AppResult};
 use crate::domain::file::{
-    FilePageData, FileRecord, FileSearchResult, FileStatus, FreezeStatus, ListFilesOptions,
-    SearchFilesOptions, SearchHighlight,
+    FileContent, FilePageData, FilePreview, FileRecord, FileSearchResult, FileStatus, FreezeStatus,
+    ImportBatchResult, ImportResultItem, ListFilesOptions, SearchFilesOptions, SearchHighlight,
+    TagSuggestion,
 };
 use crate::domain::version::VersionNode;
 use crate::infra::{clock, fs, hashing, ids};
-use crate::repositories::{file_repo, tag_repo, version_repo};
+use crate::repositories::{file_content_repo, file_repo, tag_repo, version_repo};
 
-pub fn import_files(state: &AppState, paths: Vec<String>) -> AppResult<Vec<FileRecord>> {
+const TEXT_PREVIEW_LIMIT: usize = 12_000;
+
+enum ImportedFile {
+    Created(FileRecord),
+    Duplicate(FileRecord),
+}
+
+pub fn import_files(state: &AppState, paths: Vec<String>) -> AppResult<ImportBatchResult> {
     let workspace = state.workspace()?;
-    let mut imported = Vec::with_capacity(paths.len());
+    let mut items = Vec::with_capacity(paths.len());
 
     for path in paths {
-        let source = PathBuf::from(path);
-        let file = import_single_file(&workspace, &source)?;
-        imported.push(file);
+        let source = PathBuf::from(&path);
+        let original_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.to_string());
+        match import_single_file(&workspace, &source) {
+            Ok(ImportedFile::Created(file)) => items.push(ImportResultItem {
+                path,
+                original_name,
+                status: "success".into(),
+                file: Some(file),
+                reason: None,
+                duplicate_of: None,
+            }),
+            Ok(ImportedFile::Duplicate(duplicate_of)) => items.push(ImportResultItem {
+                path,
+                original_name,
+                status: "duplicate".into(),
+                file: None,
+                reason: None,
+                duplicate_of: Some(duplicate_of),
+            }),
+            Err(error) => items.push(ImportResultItem {
+                path,
+                original_name,
+                status: "failed".into(),
+                file: None,
+                reason: Some(error.to_string()),
+                duplicate_of: None,
+            }),
+        }
     }
 
-    Ok(imported)
+    Ok(ImportBatchResult { items })
 }
 
 pub fn get_file_detail(state: &AppState, file_id: &str) -> AppResult<FileRecord> {
@@ -163,6 +200,7 @@ pub fn search_files(
     let workspace = state.workspace()?;
     workspace.with_db(|connection| {
         let options = options.unwrap_or(SearchFilesOptions {
+            scopes: None,
             tag_ids: None,
             file_types: None,
             include_archived: Some(false),
@@ -176,6 +214,18 @@ pub fn search_files(
             tag_repo::get(connection, tag_id)?;
         }
         let required_tag_set = required_tag_ids.into_iter().collect::<HashSet<_>>();
+        let scopes = options
+            .scopes
+            .unwrap_or_else(|| {
+                vec![
+                    "fileName".into(),
+                    "summary".into(),
+                    "tag".into(),
+                    "content".into(),
+                ]
+            })
+            .into_iter()
+            .collect::<HashSet<_>>();
         let file_types = options
             .file_types
             .unwrap_or_default()
@@ -206,19 +256,33 @@ pub fn search_files(
                 continue;
             }
 
-            let name_match = file.original_name.to_lowercase().contains(&keyword);
-            let summary_match = file
-                .summary
-                .as_deref()
-                .unwrap_or("")
-                .to_lowercase()
-                .contains(&keyword);
-            let matched_tags = tags
-                .iter()
-                .filter(|tag| tag.name.to_lowercase().contains(&keyword))
-                .cloned()
-                .collect::<Vec<_>>();
-            if !name_match && !summary_match && matched_tags.is_empty() {
+            let name_match =
+                scopes.contains("fileName") && file.original_name.to_lowercase().contains(&keyword);
+            let summary_match = scopes.contains("summary")
+                && file
+                    .summary
+                    .as_deref()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .contains(&keyword);
+            let matched_tags = if scopes.contains("tag") {
+                tags.iter()
+                    .filter(|tag| tag.name.to_lowercase().contains(&keyword))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            let content_text = if scopes.contains("content") {
+                file_content_repo::find(connection, &file.id)?
+                    .and_then(|content| content.content_text)
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let content_match =
+                scopes.contains("content") && content_text.to_lowercase().contains(&keyword);
+            if !name_match && !summary_match && matched_tags.is_empty() && !content_match {
                 continue;
             }
 
@@ -232,11 +296,15 @@ pub fn search_files(
             if summary_match {
                 matched_fields.push("summary".into());
             }
+            if content_match {
+                matched_fields.push("content".into());
+            }
             results.push(FileSearchResult {
                 highlight: SearchHighlight {
                     file_name: name_match.then(|| file.original_name.clone()),
                     summary: summary_match
                         .then(|| summary_excerpt(file.summary.as_deref().unwrap_or(""), &keyword)),
+                    content: content_match.then(|| text_excerpt(&content_text, &keyword, 180)),
                     tags: matched_tags.iter().map(|tag| tag.name.clone()).collect(),
                 },
                 file,
@@ -255,9 +323,205 @@ pub fn search_files(
     })
 }
 
-pub fn import_single_file(workspace: &WorkspaceContext, source: &Path) -> AppResult<FileRecord> {
+pub fn extract_file_content(state: &AppState, file_id: &str) -> AppResult<FileContent> {
+    extract_content(state, file_id)
+}
+
+pub fn reextract_file_content(state: &AppState, file_id: &str) -> AppResult<FileContent> {
+    extract_content(state, file_id)
+}
+
+pub fn get_file_content(state: &AppState, file_id: &str) -> AppResult<FileContent> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| {
+        file_repo::get(connection, file_id)?;
+        file_content_repo::get_or_pending(connection, file_id)
+    })
+}
+
+pub fn get_file_preview(state: &AppState, file_id: &str) -> AppResult<FilePreview> {
+    let workspace = state.workspace()?;
+    let file = workspace.with_db(|connection| file_repo::get(connection, file_id))?;
+    let extension = file_extension(&file).to_lowercase();
+    let path = PathBuf::from(&workspace.info.root_path).join(&file.relative_path);
+
+    if is_text_extension(&extension) {
+        let text = workspace
+            .with_db(|connection| file_content_repo::find(connection, file_id))?
+            .and_then(|content| {
+                (content.extraction_status == "success")
+                    .then_some(content.content_text)
+                    .flatten()
+            })
+            .or_else(|| std_fs::read_to_string(&path).ok())
+            .map(|text| text.chars().take(TEXT_PREVIEW_LIMIT).collect::<String>());
+        return Ok(FilePreview {
+            file_id: file_id.into(),
+            preview_type: "text".into(),
+            text,
+            image_url: None,
+            error: None,
+        });
+    }
+
+    if is_image_extension(&extension) {
+        return Ok(FilePreview {
+            file_id: file_id.into(),
+            preview_type: "image".into(),
+            text: None,
+            image_url: Some(path.to_string_lossy().to_string()),
+            error: None,
+        });
+    }
+
+    Ok(FilePreview {
+        file_id: file_id.into(),
+        preview_type: "unsupported".into(),
+        text: None,
+        image_url: None,
+        error: None,
+    })
+}
+
+pub fn generate_file_summary(state: &AppState, file_id: &str) -> AppResult<FilePageData> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| {
+        file_repo::get(connection, file_id)?;
+        let content = file_content_repo::find(connection, file_id)?
+            .and_then(|content| content.content_text)
+            .ok_or_else(|| AppError::InvalidInput("请先抽取文件内容".into()))?;
+        let summary = normalize_summary(&content);
+        if summary.is_empty() {
+            return Err(AppError::InvalidInput("文件正文为空，无法生成摘要".into()));
+        }
+        file_repo::update_summary(connection, file_id, Some(&summary), &clock::now_iso())?;
+        let file = file_repo::get(connection, file_id)?;
+        let tags = tag_repo::list_for_file(connection, file_id)?;
+        let versions = version_repo::find_node_by_file(connection, file_id)?
+            .map(|node| version_repo::list_group_nodes(connection, &node.group_id))
+            .transpose()?
+            .unwrap_or_default();
+        Ok(FilePageData {
+            file,
+            tags,
+            versions,
+        })
+    })
+}
+
+pub fn suggest_tags_for_file(state: &AppState, file_id: &str) -> AppResult<Vec<TagSuggestion>> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| {
+        let file = file_repo::get(connection, file_id)?;
+        let attached = tag_repo::list_for_file(connection, file_id)?
+            .into_iter()
+            .map(|tag| tag.id)
+            .collect::<HashSet<_>>();
+        let content = file_content_repo::find(connection, file_id)?
+            .and_then(|content| content.content_text)
+            .unwrap_or_default()
+            .to_lowercase();
+        let name = file.original_name.to_lowercase();
+        let summary = file.summary.as_deref().unwrap_or("").to_lowercase();
+        let mut suggestions = Vec::new();
+
+        for tag in tag_repo::list(connection)? {
+            if attached.contains(&tag.id) || tag.name.trim().is_empty() {
+                continue;
+            }
+            let needle = tag.name.to_lowercase();
+            let mut score = 0;
+            let mut reasons = Vec::new();
+            if name.contains(&needle) {
+                score += 3;
+                reasons.push(format!("文件名命中：{}", tag.name));
+            }
+            if summary.contains(&needle) {
+                score += 2;
+                reasons.push(format!("摘要命中：{}", tag.name));
+            }
+            if content.contains(&needle) {
+                score += 1;
+                reasons.push(format!("正文命中：{}", tag.name));
+            }
+            if score > 0 {
+                suggestions.push(TagSuggestion {
+                    tag,
+                    score,
+                    reason: reasons.join("；"),
+                });
+            }
+        }
+
+        suggestions.sort_by(|left, right| {
+            right
+                .score
+                .cmp(&left.score)
+                .then_with(|| left.tag.name.cmp(&right.tag.name))
+        });
+        Ok(suggestions)
+    })
+}
+
+fn extract_content(state: &AppState, file_id: &str) -> AppResult<FileContent> {
+    let workspace = state.workspace()?;
+    let file = workspace.with_db(|connection| file_repo::get(connection, file_id))?;
+    let extension = file_extension(&file).to_lowercase();
+    let path = PathBuf::from(&workspace.info.root_path).join(&file.relative_path);
+    let now = clock::now_iso();
+
+    let mut content = FileContent {
+        file_id: file_id.into(),
+        content_text: None,
+        extraction_status: "pending".into(),
+        extraction_error: None,
+        extracted_at: None,
+        created_at: Some(now.clone()),
+        updated_at: Some(now.clone()),
+    };
+
+    if !is_text_extension(&extension) {
+        content.extraction_status = "unsupported".into();
+        return persist_file_content(&workspace, content);
+    }
+
+    match std_fs::read_to_string(&path) {
+        Ok(text) => {
+            content.extraction_status = "success".into();
+            content.content_text = Some(text);
+            content.extracted_at = Some(now);
+        }
+        Err(error) => {
+            content.extraction_status = "failed".into();
+            content.extraction_error = Some(error.to_string());
+        }
+    }
+
+    persist_file_content(&workspace, content)
+}
+
+fn persist_file_content(
+    workspace: &WorkspaceContext,
+    mut content: FileContent,
+) -> AppResult<FileContent> {
+    workspace.with_db(|connection| {
+        if let Some(existing) = file_content_repo::find(connection, &content.file_id)? {
+            content.created_at = existing.created_at;
+        }
+        file_content_repo::upsert(connection, &content)?;
+        file_content_repo::get_or_pending(connection, &content.file_id)
+    })
+}
+
+fn import_single_file(workspace: &WorkspaceContext, source: &Path) -> AppResult<ImportedFile> {
     if !source.is_file() {
         return Err(AppError::FileNotFound);
+    }
+    let sha256 = hashing::sha256_file(source)?;
+    if let Some(duplicate) =
+        workspace.with_db(|connection| file_repo::find_active_by_sha256(connection, &sha256))?
+    {
+        return Ok(ImportedFile::Duplicate(duplicate));
     }
 
     let id = ids::new_id();
@@ -284,7 +548,7 @@ pub fn import_single_file(workspace: &WorkspaceContext, source: &Path) -> AppRes
         source_path: Some(source.to_string_lossy().to_string()),
         relative_path: fs::relative_files_path(&year, &month, &format!("{id}_{safe_name}")),
         size_bytes: metadata.len() as i64,
-        sha256: hashing::sha256_file(&destination)?,
+        sha256,
         summary: None,
         status: FileStatus::Active.as_str().into(),
         freeze_status: FreezeStatus::Draft.as_str().into(),
@@ -310,7 +574,7 @@ pub fn import_single_file(workspace: &WorkspaceContext, source: &Path) -> AppRes
         Ok(())
     })?;
 
-    Ok(record)
+    Ok(ImportedFile::Created(record))
 }
 
 fn stored_file_path(state: &AppState, file_id: &str) -> AppResult<PathBuf> {
@@ -374,19 +638,53 @@ fn file_extension(file: &FileRecord) -> String {
 }
 
 fn summary_excerpt(summary: &str, keyword: &str) -> String {
-    let lower = summary.to_lowercase();
-    if let Some(index) = lower.find(keyword) {
-        let start = summary
-            .char_indices()
-            .map(|(position, _)| position)
-            .filter(|position| *position <= index)
-            .rev()
-            .nth(24)
-            .unwrap_or(0);
-        summary[start..].chars().take(120).collect()
-    } else {
-        summary.chars().take(120).collect()
+    text_excerpt(summary, keyword, 120)
+}
+
+fn text_excerpt(text: &str, keyword: &str, limit: usize) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    if chars.is_empty() {
+        return String::new();
     }
+
+    let lower = text.to_lowercase();
+    let char_index = lower
+        .find(keyword)
+        .map(|byte_index| lower[..byte_index].chars().count())
+        .unwrap_or(0);
+    let context = 32;
+    let start = char_index.saturating_sub(context);
+    let mut excerpt = chars
+        .iter()
+        .skip(start)
+        .take(limit)
+        .collect::<String>()
+        .replace('\n', " ");
+    if start > 0 {
+        excerpt = format!("... {excerpt}");
+    }
+    if start + limit < chars.len() {
+        excerpt.push_str(" ...");
+    }
+    excerpt
+}
+
+fn is_text_extension(extension: &str) -> bool {
+    matches!(extension, "txt" | "md" | "json" | "csv")
+}
+
+fn is_image_extension(extension: &str) -> bool {
+    matches!(extension, "png" | "jpg" | "jpeg" | "webp")
+}
+
+fn normalize_summary(content: &str) -> String {
+    content
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(500)
+        .collect()
 }
 
 fn score_result(result: &FileSearchResult) -> usize {
@@ -403,6 +701,9 @@ fn score_result(result: &FileSearchResult) -> usize {
     }
     if result.matched_fields.iter().any(|field| field == "summary") {
         score += 100;
+    }
+    if result.matched_fields.iter().any(|field| field == "content") {
+        score += 60;
     }
     score
 }

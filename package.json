@@ -4,10 +4,12 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 1520",
+    "dev": "vite --host 0.0.0.0 --port 1520",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:wsl": "PATH=/root/.nvm/versions/node/v20.20.2/bin:$PATH LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 GDK_BACKEND=wayland,x11 tauri dev",
+    "tauri:wsl:compat": "PATH=/root/.nvm/versions/node/v20.20.2/bin:$PATH LIBGL_ALWAYS_SOFTWARE=1 WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 GSK_RENDERER=cairo GDK_BACKEND=wayland,x11 tauri dev"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.7.0",

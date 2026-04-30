@@ -3,12 +3,16 @@ use tauri::State;
 use crate::app::state::AppState;
 use crate::domain::errors::AppResult;
 use crate::domain::file::{
-    FilePageData, FileRecord, FileSearchResult, ListFilesOptions, SearchFilesOptions,
+    FileContent, FilePageData, FilePreview, FileRecord, FileSearchResult, ImportBatchResult,
+    ListFilesOptions, SearchFilesOptions, TagSuggestion,
 };
 use crate::services::file_service;
 
 #[tauri::command]
-pub fn import_files(paths: Vec<String>, state: State<'_, AppState>) -> AppResult<Vec<FileRecord>> {
+pub fn import_files(
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> AppResult<ImportBatchResult> {
     file_service::import_files(&state, paths)
 }
 
@@ -75,4 +79,43 @@ pub fn search_files(
     state: State<'_, AppState>,
 ) -> AppResult<Vec<FileSearchResult>> {
     file_service::search_files(&state, keyword, options)
+}
+
+#[tauri::command]
+pub fn extract_file_content(file_id: String, state: State<'_, AppState>) -> AppResult<FileContent> {
+    file_service::extract_file_content(&state, &file_id)
+}
+
+#[tauri::command]
+pub fn get_file_content(file_id: String, state: State<'_, AppState>) -> AppResult<FileContent> {
+    file_service::get_file_content(&state, &file_id)
+}
+
+#[tauri::command]
+pub fn reextract_file_content(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<FileContent> {
+    file_service::reextract_file_content(&state, &file_id)
+}
+
+#[tauri::command]
+pub fn get_file_preview(file_id: String, state: State<'_, AppState>) -> AppResult<FilePreview> {
+    file_service::get_file_preview(&state, &file_id)
+}
+
+#[tauri::command]
+pub fn generate_file_summary(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<FilePageData> {
+    file_service::generate_file_summary(&state, &file_id)
+}
+
+#[tauri::command]
+pub fn suggest_tags_for_file(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<TagSuggestion>> {
+    file_service::suggest_tags_for_file(&state, &file_id)
 }

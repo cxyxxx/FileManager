@@ -8,18 +8,46 @@ use crate::domain::tag::Tag;
 pub struct SavedQuery {
     pub id: String,
     pub name: String,
+    pub query_type: String,
+    pub payload: SavedQueryPayload,
     pub mode: String,
     pub tag_ids: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagQueryPayload {
+    pub tag_ids: Vec<String>,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeywordQueryPayload {
+    pub keyword: String,
+    pub scopes: Option<Vec<String>>,
+    pub tag_ids: Option<Vec<String>>,
+    pub file_types: Option<Vec<String>>,
+    pub include_archived: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SavedQueryPayload {
+    Tag(TagQueryPayload),
+    Keyword(KeywordQueryPayload),
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveQueryPayload {
     pub name: String,
-    pub mode: String,
-    pub tag_ids: Vec<String>,
+    pub query_type: Option<String>,
+    pub payload: Option<SavedQueryPayload>,
+    pub mode: Option<String>,
+    pub tag_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

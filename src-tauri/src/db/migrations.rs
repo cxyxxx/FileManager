@@ -73,11 +73,28 @@ pub fn run_migrations(connection: &Connection) -> AppResult<()> {
           updated_at TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS file_contents (
+          file_id TEXT PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+          content_text TEXT,
+          extraction_status TEXT NOT NULL,
+          extraction_error TEXT,
+          extracted_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
         INSERT OR IGNORE INTO migrations (id, applied_at)
         VALUES ('0001_initial_schema', datetime('now'));
         "#,
     )?;
     ensure_column(connection, "files", "summary", "TEXT")?;
+    ensure_column(
+        connection,
+        "saved_queries",
+        "query_type",
+        "TEXT NOT NULL DEFAULT 'tag'",
+    )?;
+    ensure_column(connection, "saved_queries", "payload_json", "TEXT")?;
     Ok(())
 }
 

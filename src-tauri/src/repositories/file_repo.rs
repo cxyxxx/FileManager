@@ -45,6 +45,20 @@ pub fn find(connection: &Connection, file_id: &str) -> AppResult<Option<FileReco
         .map_err(AppError::from)
 }
 
+pub fn find_active_by_sha256(
+    connection: &Connection,
+    sha256: &str,
+) -> AppResult<Option<FileRecord>> {
+    connection
+        .query_row(
+            "SELECT * FROM files WHERE sha256 = ?1 AND status != 'archived' LIMIT 1",
+            params![sha256],
+            map_file_record,
+        )
+        .optional()
+        .map_err(AppError::from)
+}
+
 pub fn list_by_tag(connection: &Connection, tag_id: &str) -> AppResult<Vec<FileRecord>> {
     let mut statement = connection.prepare(
         r#"

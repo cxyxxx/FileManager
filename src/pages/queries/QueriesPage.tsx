@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { navigateTo } from "../../app/router/routes";
+import { searchFiles } from "../../features/files/api/filesApi";
 import {
   deleteSavedQuery,
   getSavedQueries,
@@ -9,9 +10,10 @@ import {
 } from "../../features/queries/api/queriesApi";
 import { FileTable } from "../../features/files/components/FileTable";
 import { SavedQueryCard } from "../../features/queries/components/SavedQueryCard";
+import { SearchResultList } from "../../features/search/components/SearchResultList";
 import { TagPicker } from "../../features/tags/components/TagPicker";
 import { useTags } from "../../features/tags/hooks/useTags";
-import type { FileRecord, SavedQuery } from "../../shared/types/domain";
+import type { FileRecord, FileSearchResult, SavedQuery } from "../../shared/types/domain";
 
 export function QueriesPage() {
   const { tags } = useTags();
@@ -19,6 +21,8 @@ export function QueriesPage() {
   const [mode, setMode] = useState<"and" | "or">("and");
   const [queryName, setQueryName] = useState("");
   const [files, setFiles] = useState<FileRecord[]>([]);
+  const [keywordResults, setKeywordResults] = useState<FileSearchResult[]>([]);
+  const [resultMode, setResultMode] = useState<"tag" | "keyword">("tag");
   const [savedQueries, setSavedQueries] = useState<SavedQuery[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -49,6 +53,8 @@ export function QueriesPage() {
     setNotice(null);
     try {
       setFiles(await queryFilesByTags(tagIds, queryMode));
+      setKeywordResults([]);
+      setResultMode("tag");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -75,9 +81,34 @@ export function QueriesPage() {
   }
 
   async function applySavedQuery(query: SavedQuery) {
-    setSelectedTagIds(query.tagIds);
-    setMode(query.mode);
-    await runQuery(query.tagIds, query.mode);
+    if (query.queryType === "keyword" && "keyword" in query.payload) {
+      setBusyQueryId(query.id);
+      setLoading(true);
+      setError(null);
+      setNotice(null);
+      try {
+        setKeywordResults(await searchFiles(query.payload.keyword, {
+          scopes: query.payload.scopes,
+          tagIds: query.payload.tagIds,
+          fileTypes: query.payload.fileTypes,
+          includeArchived: query.payload.includeArchived,
+        }));
+        setFiles([]);
+        setResultMode("keyword");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+        setBusyQueryId(null);
+      }
+      return;
+    }
+
+    const tagIds = "mode" in query.payload ? query.payload.tagIds : query.tagIds;
+    const queryMode = "mode" in query.payload ? query.payload.mode : query.mode;
+    setSelectedTagIds(tagIds);
+    setMode(queryMode);
+    await runQuery(tagIds, queryMode);
   }
 
   async function renameQuery(query: SavedQuery) {
@@ -144,12 +175,16 @@ export function QueriesPage() {
           {error ? <p className="error-text">操作失败：{error}</p> : null}
           {notice ? <p className="success-text">{notice}</p> : null}
           <h3 className="subheading">查询结果</h3>
-          <FileTable
-            files={files}
-            emptyTitle="暂无查询结果"
-            emptyDescription="选择 tag 并执行查询后，结果会显示在这里。"
-            onOpen={(file) => navigateTo(`/files/${encodeURIComponent(file.id)}`)}
-          />
+          {resultMode === "keyword" ? (
+            <SearchResultList results={keywordResults} loading={loading} searched />
+          ) : (
+            <FileTable
+              files={files}
+              emptyTitle="暂无查询结果"
+              emptyDescription="选择 tag 并执行查询后，结果会显示在这里。"
+              onOpen={(file) => navigateTo(`/files/${encodeURIComponent(file.id)}`)}
+            />
+          )}
         </div>
         <aside className="side-panel">
           <h3>已保存查询</h3>
@@ -169,7 +204,7 @@ export function QueriesPage() {
           ) : (
             <div className="empty-block">
               <strong>暂无 saved query</strong>
-              <span>保存常用 tag 查询后会显示在这里。</span>
+              <span>保存常用 tag 查询或关键词搜索后会显示在这里。</span>
             </div>
           )}
         </aside>

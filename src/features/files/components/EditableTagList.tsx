@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Tag } from "../../../shared/types/domain";
+import type { Tag, TagSuggestion } from "../../../shared/types/domain";
 import { TagBadge } from "../../tags/components/TagBadge";
 import { TagPicker } from "../../tags/components/TagPicker";
 
@@ -8,10 +8,11 @@ type EditableTagListProps = {
   attachedTags: Tag[];
   saving?: boolean;
   error?: string | null;
+  suggestions?: TagSuggestion[];
   onSave: (tagIds: string[]) => Promise<void> | void;
 };
 
-export function EditableTagList({ allTags, attachedTags, saving = false, error, onSave }: EditableTagListProps) {
+export function EditableTagList({ allTags, attachedTags, saving = false, error, suggestions = [], onSave }: EditableTagListProps) {
   const [editing, setEditing] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>(attachedTags.map((tag) => tag.id));
   const tagById = useMemo(() => new Map(allTags.map((tag) => [tag.id, tag])), [allTags]);
@@ -25,6 +26,11 @@ export function EditableTagList({ allTags, attachedTags, saving = false, error, 
   async function save() {
     await onSave(selectedIds);
     setEditing(false);
+  }
+
+  function addSuggestion(tagId: string) {
+    setEditing(true);
+    setSelectedIds((current) => current.includes(tagId) ? current : [...current, tagId]);
   }
 
   return (
@@ -76,6 +82,22 @@ export function EditableTagList({ allTags, attachedTags, saving = false, error, 
           {attachedTags.length > 0 ? attachedTags.map((tag) => <TagBadge key={tag.id} tag={tag} />) : <span className="muted">暂无 tag</span>}
         </div>
       )}
+      {suggestions.length > 0 ? (
+        <div className="suggestion-list">
+          <strong>推荐 Tag</strong>
+          {suggestions.map((suggestion) => (
+            <div className="suggestion-row" key={suggestion.tag.id}>
+              <div>
+                <TagBadge tag={suggestion.tag} />
+                <small className="muted-line">{suggestion.reason} · score {suggestion.score}</small>
+              </div>
+              <button className="button secondary small" type="button" onClick={() => addSuggestion(suggestion.tag.id)}>
+                添加
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

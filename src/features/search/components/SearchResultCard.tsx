@@ -7,6 +7,7 @@ const fieldLabels: Record<string, string> = {
   fileName: "文件名",
   summary: "摘要",
   tag: "Tag",
+  content: "正文",
 };
 
 export function SearchResultCard({ result }: { result: FileSearchResult }) {
@@ -17,6 +18,7 @@ export function SearchResultCard({ result }: { result: FileSearchResult }) {
           {result.highlight?.fileName ?? result.file.originalName}
         </button>
         <p>{result.highlight?.summary ?? summaryPreview(result.file.summary)}</p>
+        {result.highlight?.content ? <p className="content-hit">... {result.highlight.content} ...</p> : null}
       </div>
       <div className="badge-row">
         {result.matchedFields.map((field) => (

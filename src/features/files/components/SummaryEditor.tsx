@@ -5,9 +5,12 @@ type SummaryEditorProps = {
   saving?: boolean;
   error?: string | null;
   onSave: (summary: string) => Promise<void> | void;
+  onGenerate?: () => Promise<void> | void;
+  generating?: boolean;
+  generateError?: string | null;
 };
 
-export function SummaryEditor({ summary, saving = false, error, onSave }: SummaryEditorProps) {
+export function SummaryEditor({ summary, saving = false, error, onSave, onGenerate, generating = false, generateError }: SummaryEditorProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(summary ?? "");
 
@@ -27,11 +30,19 @@ export function SummaryEditor({ summary, saving = false, error, onSave }: Summar
       <section className="content-section">
         <div className="section-title-row">
           <h3>摘要</h3>
-          <button className="button secondary small" type="button" onClick={() => setEditing(true)}>
-            编辑摘要
-          </button>
+          <div className="toolbar compact-actions">
+            {onGenerate ? (
+              <button className="button secondary small" type="button" disabled={generating} onClick={() => void onGenerate()}>
+                {generating ? "生成中..." : "生成摘要"}
+              </button>
+            ) : null}
+            <button className="button secondary small" type="button" onClick={() => setEditing(true)}>
+              编辑摘要
+            </button>
+          </div>
         </div>
         <p className={summary?.trim() ? "summary-body" : "empty-state"}>{summary?.trim() || "暂无摘要"}</p>
+        {generateError ? <p className="error-text">生成失败：{generateError}</p> : null}
       </section>
     );
   }

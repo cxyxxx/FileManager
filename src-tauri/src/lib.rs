@@ -7,12 +7,21 @@ pub mod policies;
 pub mod repositories;
 pub mod services;
 
+use tauri::Manager;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let state = app::bootstrap::bootstrap_state();
 
     tauri::Builder::default()
         .manage(state)
+        .setup(|app| {
+            #[cfg(debug_assertions)]
+            if let Some(webview) = app.get_webview_window("main") {
+                webview.open_devtools();
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::workspace::init_workspace,
             commands::workspace::get_workspace_info,
@@ -28,6 +37,12 @@ pub fn run() {
             commands::files::open_file,
             commands::files::reveal_file,
             commands::files::search_files,
+            commands::files::extract_file_content,
+            commands::files::get_file_content,
+            commands::files::reextract_file_content,
+            commands::files::get_file_preview,
+            commands::files::generate_file_summary,
+            commands::files::suggest_tags_for_file,
             commands::tags::create_tag,
             commands::tags::list_tags,
             commands::tags::set_tag_parent,

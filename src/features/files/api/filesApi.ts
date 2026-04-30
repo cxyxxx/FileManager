@@ -1,13 +1,17 @@
 import { command } from "../../../shared/lib/tauri";
 import type {
+  FileContent,
   FilePageData,
+  FilePreview,
   FileRecord,
   FileSearchResult,
+  ImportBatchResult,
   SearchFilesOptions,
+  TagSuggestion,
 } from "../../../shared/types/domain";
 
 export function importFiles(paths: string[]) {
-  return command<FileRecord[]>("import_files", { paths });
+  return command<ImportBatchResult>("import_files", { paths });
 }
 
 export function getFileDetail(fileId: string) {
@@ -60,6 +64,30 @@ export function restoreFile(fileId: string) {
 
 export function searchFiles(keyword: string, options?: SearchFilesOptions) {
   return command<FileSearchResult[]>("search_files", { keyword, options });
+}
+
+export function extractFileContent(fileId: string) {
+  return command<FileContent>("extract_file_content", { fileId });
+}
+
+export function getFileContent(fileId: string) {
+  return command<FileContent>("get_file_content", { fileId });
+}
+
+export function reextractFileContent(fileId: string) {
+  return command<FileContent>("reextract_file_content", { fileId });
+}
+
+export function getFilePreview(fileId: string) {
+  return command<FilePreview>("get_file_preview", { fileId });
+}
+
+export function generateFileSummary(fileId: string) {
+  return command<FilePageData>("generate_file_summary", { fileId });
+}
+
+export function suggestTagsForFile(fileId: string) {
+  return command<TagSuggestion[]>("suggest_tags_for_file", { fileId });
 }
 
 export function selectFiles(): Promise<string[]> {

@@ -35,6 +35,19 @@ export type FilePageData = {
   versions: VersionNode[];
 };
 
+export type ImportBatchResult = {
+  items: ImportResultItem[];
+};
+
+export type ImportResultItem = {
+  path: string;
+  originalName?: string | null;
+  status: "success" | "failed" | "duplicate";
+  file?: FileRecord | null;
+  reason?: string | null;
+  duplicateOf?: FileRecord | null;
+};
+
 export type Tag = {
   id: string;
   name: string;
@@ -57,8 +70,8 @@ export type VersionNode = {
 export type SavedQuery = {
   id: string;
   name: string;
-  queryType?: "tag" | "keyword";
-  payload?: SavedQueryPayload;
+  queryType: "tag" | "keyword";
+  payload: SavedQueryPayload;
   mode: "and" | "or";
   tagIds: string[];
   createdAt: string;
@@ -72,11 +85,16 @@ export type SavedQueryPayload =
     }
   | {
       keyword: string;
+      scopes?: SearchScope[];
       tagIds?: string[];
+      fileTypes?: string[];
       includeArchived?: boolean;
     };
 
+export type SearchScope = "fileName" | "summary" | "tag" | "content";
+
 export type SearchFilesOptions = {
+  scopes?: SearchScope[];
   tagIds?: string[];
   fileTypes?: string[];
   includeArchived?: boolean;
@@ -85,12 +103,37 @@ export type SearchFilesOptions = {
 export type FileSearchResult = {
   file: FileRecord;
   matchedTags: Tag[];
-  matchedFields: Array<"fileName" | "summary" | "tag">;
+  matchedFields: SearchScope[];
   highlight?: {
     fileName?: string;
     summary?: string;
+    content?: string;
     tags?: string[];
   };
+};
+
+export type FileContent = {
+  fileId: string;
+  contentText?: string | null;
+  extractionStatus: "pending" | "success" | "failed" | "unsupported";
+  extractionError?: string | null;
+  extractedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type FilePreview = {
+  fileId: string;
+  previewType: "text" | "image" | "unsupported";
+  text?: string | null;
+  imageUrl?: string | null;
+  error?: string | null;
+};
+
+export type TagSuggestion = {
+  tag: Tag;
+  score: number;
+  reason: string;
 };
 
 export type UpdateTagPayload = {
