@@ -1,7 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const host = process.env.TAURI_DEV_HOST ?? "127.0.0.1";
+const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   plugins: [react(), stripViteClient()],
@@ -20,9 +20,9 @@ export default defineConfig({
   },
   server: {
     hmr: false,
-    port: 1520,
+    port: 1420,
     strictPort: true,
-    host: true, // Listen on all addresses for WSL port forwarding
+    host: host || false,
     watch: {
       ignored: ["**/src-tauri/**", "**/target/**", "**/.git/**", "**/.vscode/**"],
       usePolling: true,

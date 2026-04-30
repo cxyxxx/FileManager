@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 1520",
+    "dev": "vite --port 1420",
+    "dev:tauri": "vite build --watch",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "tauri": "tauri",

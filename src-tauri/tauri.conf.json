@@ -4,9 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.filesmanager.app",
   "build": {
-    "beforeDevCommand": "",
+    "beforeDevCommand": "pnpm run dev:tauri",
     "beforeBuildCommand": "pnpm run build",
-    "devUrl": "http://127.0.0.1:1520",
     "frontendDist": "../dist"
   },
   "app": {
