@@ -16,7 +16,11 @@ pub fn create_derived_version(
 }
 
 #[tauri::command]
-pub fn set_version_role(file_id: String, role: String, state: State<'_, AppState>) -> AppResult<VersionNode> {
+pub fn set_version_role(
+    file_id: String,
+    role: String,
+    state: State<'_, AppState>,
+) -> AppResult<VersionNode> {
     version_service::set_version_role(&state, &file_id, role)
 }
 
@@ -31,6 +35,9 @@ pub fn set_core_version(
 }
 
 #[tauri::command]
-pub fn get_version_chain(file_id: String, state: State<'_, AppState>) -> AppResult<Vec<VersionNode>> {
+pub fn get_version_chain(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<VersionNode>> {
     version_service::get_version_chain(&state, &file_id)
 }

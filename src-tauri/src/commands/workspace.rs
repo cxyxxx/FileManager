@@ -5,7 +5,10 @@ use crate::domain::errors::AppResult;
 use crate::services::workspace_service;
 
 #[tauri::command]
-pub fn init_workspace(path: Option<String>, state: State<'_, AppState>) -> AppResult<WorkspaceInfo> {
+pub fn init_workspace(
+    path: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<WorkspaceInfo> {
     workspace_service::init_workspace(&state, path)
 }
 

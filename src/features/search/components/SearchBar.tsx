@@ -1,8 +1,10 @@
 import { FormEvent, useState } from "react";
 import { navigateTo } from "../../../app/router/routes";
+import { useImeSafeHandlers } from "../../../shared/lib/ime";
 
 export function SearchBar({ initialValue = "" }: { initialValue?: string }) {
   const [value, setValue] = useState(initialValue);
+  const ime = useImeSafeHandlers();
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -13,7 +15,7 @@ export function SearchBar({ initialValue = "" }: { initialValue?: string }) {
   }
 
   return (
-    <form className="global-search" onSubmit={onSubmit}>
+    <form className="global-search" onSubmit={onSubmit} {...ime}>
       <input
         className="input"
         value={value}

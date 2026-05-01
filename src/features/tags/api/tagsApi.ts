@@ -27,3 +27,7 @@ export function updateTag(tagId: string, payload: UpdateTagPayload) {
 export function deleteTag(tagId: string) {
   return command<void>("delete_tag", { tagId });
 }
+
+export function clearAllTags() {
+  return command<number>("clear_all_tags");
+}

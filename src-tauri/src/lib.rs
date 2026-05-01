@@ -14,6 +14,7 @@ pub fn run() {
     let state = app::bootstrap::bootstrap_state();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state)
         .setup(|app| {
             #[cfg(debug_assertions)]
@@ -34,6 +35,7 @@ pub fn run() {
             commands::files::set_file_tags,
             commands::files::archive_file,
             commands::files::restore_file,
+            commands::files::clear_all_files,
             commands::files::open_file,
             commands::files::reveal_file,
             commands::files::search_files,
@@ -48,6 +50,7 @@ pub fn run() {
             commands::tags::set_tag_parent,
             commands::tags::update_tag,
             commands::tags::delete_tag,
+            commands::tags::clear_all_tags,
             commands::tags::attach_tags_to_file,
             commands::versions::create_derived_version,
             commands::versions::set_version_role,

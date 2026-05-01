@@ -1,8 +1,15 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { navigateTo } from "../../app/router/routes";
-import { archiveFile, extractFileContent, importFiles, listFiles, restoreFile } from "../../features/files/api/filesApi";
+import {
+  archiveFile,
+  clearAllFiles,
+  extractFileContent,
+  importFiles,
+  listFiles,
+  restoreFile,
+} from "../../features/files/api/filesApi";
 import { FilePickerDropzone } from "../../features/files/components/FilePickerDropzone";
-import { FileTable } from "../../features/files/components/FileTable";
+import { FileTreeList } from "../../features/files/components/FileTreeList";
 import { ImportResultPanel } from "../../features/files/components/ImportResultPanel";
 import type { FileRecord, ImportResultItem } from "../../shared/types/domain";
 
@@ -18,6 +25,7 @@ export function FilePage() {
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [clearing, setClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -96,6 +104,30 @@ export function FilePage() {
     }
   }
 
+  async function clearAllFilesDebug() {
+    if (
+      !window.confirm(
+        "确认清空当前所有文件吗？\n这会删除数据库里的所有文件记录，并清空本地 files / previews 目录，操作不可恢复。",
+      )
+    ) {
+      return;
+    }
+    setClearing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const deletedCount = await clearAllFiles();
+      setRecentImported([]);
+      setImportResults([]);
+      setNotice(`已清空 ${deletedCount} 个文件`);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setClearing(false);
+    }
+  }
+
   return (
     <section className="panel">
       <div className="section-heading">
@@ -118,6 +150,11 @@ export function FilePage() {
             </button>
           </div>
         </form>
+        <div className="toolbar compact-actions">
+          <button className="button danger small" type="button" disabled={clearing || importing} onClick={() => void clearAllFilesDebug()}>
+            {clearing ? "清空中..." : "清空全部文件"}
+          </button>
+        </div>
       </details>
       {notice ? <p className="success-text">{notice}</p> : null}
       {error ? <p className="error-text">导入失败：{error}</p> : null}
@@ -125,7 +162,7 @@ export function FilePage() {
       {recentImported.length > 0 ? (
         <>
           <h3 className="subheading">最近导入</h3>
-          <FileTable files={recentImported} onOpen={(file) => navigateTo(`/files/${encodeURIComponent(file.id)}`)} />
+          <FileTreeList files={recentImported} onOpen={(file) => navigateTo(`/files/${encodeURIComponent(file.id)}`)} />
         </>
       ) : null}
       <div className="section-title-row list-heading-row">
@@ -143,7 +180,7 @@ export function FilePage() {
       </div>
       {loading ? <p className="empty-state">正在加载文件...</p> : null}
       {!loading ? (
-        <FileTable
+        <FileTreeList
           files={files}
           emptyTitle="暂无文件"
           emptyDescription="导入文件后，它们会先进入 Inbox。"

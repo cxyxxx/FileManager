@@ -39,6 +39,11 @@ pub fn delete_tag(tag_id: String, state: State<'_, AppState>) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub fn clear_all_tags(state: State<'_, AppState>) -> AppResult<usize> {
+    tag_service::clear_all_tags(&state)
+}
+
+#[tauri::command]
 pub fn attach_tags_to_file(
     file_id: String,
     tag_ids: Vec<String>,

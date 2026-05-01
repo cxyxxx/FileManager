@@ -13,10 +13,12 @@ import { SavedQueryCard } from "../../features/queries/components/SavedQueryCard
 import { SearchResultList } from "../../features/search/components/SearchResultList";
 import { TagPicker } from "../../features/tags/components/TagPicker";
 import { useTags } from "../../features/tags/hooks/useTags";
+import { useImeSafeHandlers } from "../../shared/lib/ime";
 import type { FileRecord, FileSearchResult, SavedQuery } from "../../shared/types/domain";
 
 export function QueriesPage() {
-  const { tags } = useTags();
+  const { tags, create } = useTags();
+  const ime = useImeSafeHandlers();
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [mode, setMode] = useState<"and" | "or">("and");
   const [queryName, setQueryName] = useState("");
@@ -154,8 +156,14 @@ export function QueriesPage() {
       </div>
       <div className="queries-grid">
         <div>
-          <form onSubmit={onSubmit}>
-            <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} />
+          <form onSubmit={onSubmit} {...ime}>
+            <TagPicker
+              tags={tags}
+              selectedIds={selectedTagIds}
+              onChange={setSelectedTagIds}
+              onCreateTag={create}
+              createDefaults={{ tagType: "topic", isTopicEnabled: true }}
+            />
             <div className="toolbar">
               <select className="input" value={mode} onChange={(event) => setMode(event.target.value as "and" | "or")}>
                 <option value="and">AND</option>

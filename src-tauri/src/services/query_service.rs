@@ -30,15 +30,22 @@ pub fn query_files_by_tags(
         for tag_id in &tag_ids {
             tag_repo::get(connection, tag_id)?;
         }
+        let all_tags = tag_repo::list(connection)?;
+        let tag_families = expand_tag_families(&tag_ids, &all_tags);
 
         match mode.as_str() {
             "or" => {
                 let mut ids = Vec::new();
                 let mut by_id = HashMap::new();
-                for tag_id in tag_ids {
-                    for file in file_repo::list_by_tag(connection, &tag_id)? {
-                        ids.push(file.id.clone());
-                        by_id.insert(file.id.clone(), file);
+                for family in &tag_families {
+                    let mut seen_for_family = HashSet::new();
+                    for tag_id in family {
+                        for file in file_repo::list_by_tag(connection, tag_id)? {
+                            if seen_for_family.insert(file.id.clone()) {
+                                ids.push(file.id.clone());
+                                by_id.insert(file.id.clone(), file);
+                            }
+                        }
                     }
                 }
                 Ok(aggregation_policy::dedupe_file_ids(ids)
@@ -49,19 +56,21 @@ pub fn query_files_by_tags(
             "and" => {
                 let mut counts: HashMap<String, usize> = HashMap::new();
                 let mut by_id = HashMap::new();
-                for tag_id in &tag_ids {
-                    let mut seen_for_tag = HashSet::new();
-                    for file in file_repo::list_by_tag(connection, tag_id)? {
-                        if seen_for_tag.insert(file.id.clone()) {
-                            *counts.entry(file.id.clone()).or_default() += 1;
-                            by_id.insert(file.id.clone(), file);
+                for family in &tag_families {
+                    let mut seen_for_family = HashSet::new();
+                    for tag_id in family {
+                        for file in file_repo::list_by_tag(connection, tag_id)? {
+                            if seen_for_family.insert(file.id.clone()) {
+                                *counts.entry(file.id.clone()).or_default() += 1;
+                                by_id.insert(file.id.clone(), file);
+                            }
                         }
                     }
                 }
                 Ok(counts
                     .into_iter()
                     .filter_map(|(file_id, count)| {
-                        if count == tag_ids.len() {
+                        if count == tag_families.len() {
                             by_id.remove(&file_id)
                         } else {
                             None
@@ -245,6 +254,17 @@ fn normalize_saved_query_payload(payload: &SaveQueryPayload) -> AppResult<SavedQ
     }
 }
 
+fn expand_tag_families(tag_ids: &[String], tags: &[Tag]) -> Vec<HashSet<String>> {
+    tag_ids
+        .iter()
+        .map(|tag_id| {
+            descendant_tag_ids(tag_id, tags)
+                .into_iter()
+                .collect::<HashSet<_>>()
+        })
+        .collect()
+}
+
 fn descendant_tag_ids(root_id: &str, tags: &[Tag]) -> Vec<String> {
     let mut result = Vec::new();
     let mut visited = HashSet::new();
@@ -361,6 +381,18 @@ mod tests {
     }
 
     #[test]
+    fn query_files_by_tags_includes_descendant_matches() {
+        let state = test_state();
+        seed_tag_page_fixture(&state);
+
+        let files = query_files_by_tags(&state, vec!["tag_tech".into()], "or".into()).unwrap();
+
+        let mut file_ids = ids(&files);
+        file_ids.sort();
+        assert_eq!(file_ids, vec!["file_rag", "file_tech"]);
+    }
+
+    #[test]
     fn rejects_invalid_tag_page_mode() {
         let state = test_state();
 
@@ -441,6 +473,11 @@ mod tests {
             stored_name: format!("{id}.pdf"),
             source_path: None,
             relative_path: format!("{id}.pdf"),
+            import_batch_id: None,
+            import_root_name: None,
+            import_root_path: None,
+            import_relative_path: None,
+            imported_at: None,
             size_bytes: 1,
             sha256: format!("sha-{id}"),
             summary: None,

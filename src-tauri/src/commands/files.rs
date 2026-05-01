@@ -63,6 +63,11 @@ pub fn restore_file(file_id: String, state: State<'_, AppState>) -> AppResult<()
 }
 
 #[tauri::command]
+pub fn clear_all_files(state: State<'_, AppState>) -> AppResult<usize> {
+    file_service::clear_all_files(&state)
+}
+
+#[tauri::command]
 pub fn open_file(file_id: String, state: State<'_, AppState>) -> AppResult<()> {
     file_service::open_file(&state, &file_id)
 }

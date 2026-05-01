@@ -7,10 +7,11 @@ pub fn insert(connection: &Connection, file: &FileRecord) -> AppResult<()> {
     connection.execute(
         r#"
         INSERT INTO files (
-          id, original_name, stored_name, source_path, relative_path, size_bytes,
+          id, original_name, stored_name, source_path, relative_path, import_batch_id,
+          import_root_name, import_root_path, import_relative_path, imported_at, size_bytes,
           sha256, summary, status, freeze_status, created_at, updated_at
         )
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
         "#,
         params![
             file.id,
@@ -18,6 +19,11 @@ pub fn insert(connection: &Connection, file: &FileRecord) -> AppResult<()> {
             file.stored_name,
             file.source_path,
             file.relative_path,
+            file.import_batch_id,
+            file.import_root_name,
+            file.import_root_path,
+            file.import_relative_path,
+            file.imported_at,
             file.size_bytes,
             file.sha256,
             file.summary,
@@ -37,7 +43,28 @@ pub fn get(connection: &Connection, file_id: &str) -> AppResult<FileRecord> {
 pub fn find(connection: &Connection, file_id: &str) -> AppResult<Option<FileRecord>> {
     connection
         .query_row(
-            "SELECT * FROM files WHERE id = ?1",
+            r#"
+            SELECT
+              files.id,
+              files.original_name,
+              files.stored_name,
+              files.source_path,
+              files.relative_path,
+              files.import_batch_id,
+              files.import_root_name,
+              files.import_root_path,
+              files.import_relative_path,
+              files.imported_at,
+              files.size_bytes,
+              files.sha256,
+              files.summary,
+              files.status,
+              files.freeze_status,
+              files.created_at,
+              files.updated_at
+            FROM files
+            WHERE id = ?1
+            "#,
             params![file_id],
             map_file_record,
         )
@@ -51,7 +78,29 @@ pub fn find_active_by_sha256(
 ) -> AppResult<Option<FileRecord>> {
     connection
         .query_row(
-            "SELECT * FROM files WHERE sha256 = ?1 AND status != 'archived' LIMIT 1",
+            r#"
+            SELECT
+              files.id,
+              files.original_name,
+              files.stored_name,
+              files.source_path,
+              files.relative_path,
+              files.import_batch_id,
+              files.import_root_name,
+              files.import_root_path,
+              files.import_relative_path,
+              files.imported_at,
+              files.size_bytes,
+              files.sha256,
+              files.summary,
+              files.status,
+              files.freeze_status,
+              files.created_at,
+              files.updated_at
+            FROM files
+            WHERE sha256 = ?1 AND status != 'archived'
+            LIMIT 1
+            "#,
             params![sha256],
             map_file_record,
         )
@@ -62,7 +111,24 @@ pub fn find_active_by_sha256(
 pub fn list_by_tag(connection: &Connection, tag_id: &str) -> AppResult<Vec<FileRecord>> {
     let mut statement = connection.prepare(
         r#"
-        SELECT files.*
+        SELECT
+          files.id,
+          files.original_name,
+          files.stored_name,
+          files.source_path,
+          files.relative_path,
+          files.import_batch_id,
+          files.import_root_name,
+          files.import_root_path,
+          files.import_relative_path,
+          files.imported_at,
+          files.size_bytes,
+          files.sha256,
+          files.summary,
+          files.status,
+          files.freeze_status,
+          files.created_at,
+          files.updated_at
         FROM files
         JOIN file_tags ON file_tags.file_id = files.id
         WHERE file_tags.tag_id = ?1 AND files.status != 'archived'
@@ -77,7 +143,24 @@ pub fn list_by_tag(connection: &Connection, tag_id: &str) -> AppResult<Vec<FileR
 pub fn list_inbox(connection: &Connection) -> AppResult<Vec<FileRecord>> {
     let mut statement = connection.prepare(
         r#"
-        SELECT files.*
+        SELECT
+          files.id,
+          files.original_name,
+          files.stored_name,
+          files.source_path,
+          files.relative_path,
+          files.import_batch_id,
+          files.import_root_name,
+          files.import_root_path,
+          files.import_relative_path,
+          files.imported_at,
+          files.size_bytes,
+          files.sha256,
+          files.summary,
+          files.status,
+          files.freeze_status,
+          files.created_at,
+          files.updated_at
         FROM files
         WHERE files.status != 'archived'
           AND NOT EXISTS (
@@ -104,7 +187,25 @@ pub fn list_all(connection: &Connection, options: &ListFilesOptions) -> AppResul
         "WHERE status != 'archived'"
     };
     let mut statement = connection.prepare(&format!(
-        "SELECT * FROM files {where_clause} ORDER BY updated_at DESC"
+        "SELECT
+          id,
+          original_name,
+          stored_name,
+          source_path,
+          relative_path,
+          import_batch_id,
+          import_root_name,
+          import_root_path,
+          import_relative_path,
+          imported_at,
+          size_bytes,
+          sha256,
+          summary,
+          status,
+          freeze_status,
+          created_at,
+          updated_at
+        FROM files {where_clause} ORDER BY updated_at DESC"
     ))?;
     let rows = statement.query_map([], map_file_record)?;
     let files = collect_files(rows)?;
@@ -171,6 +272,11 @@ fn map_file_record(row: &Row<'_>) -> rusqlite::Result<FileRecord> {
         stored_name: row.get("stored_name")?,
         source_path: row.get("source_path")?,
         relative_path: row.get("relative_path")?,
+        import_batch_id: row.get("import_batch_id")?,
+        import_root_name: row.get("import_root_name")?,
+        import_root_path: row.get("import_root_path")?,
+        import_relative_path: row.get("import_relative_path")?,
+        imported_at: row.get("imported_at")?,
         size_bytes: row.get("size_bytes")?,
         sha256: row.get("sha256")?,
         summary: row.get("summary")?,

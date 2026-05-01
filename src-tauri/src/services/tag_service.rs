@@ -122,6 +122,28 @@ pub fn delete_tag(state: &AppState, tag_id: &str) -> AppResult<()> {
     })
 }
 
+pub fn clear_all_tags(state: &AppState) -> AppResult<usize> {
+    let workspace = state.workspace()?;
+    workspace.with_db(|connection| {
+        connection.execute_batch("BEGIN IMMEDIATE TRANSACTION;")?;
+        let result = (|| {
+            let deleted_tags = connection.execute("DELETE FROM tags", [])?;
+            Ok(deleted_tags)
+        })();
+
+        match result {
+            Ok(deleted_tags) => {
+                connection.execute_batch("COMMIT;")?;
+                Ok(deleted_tags)
+            }
+            Err(error) => {
+                let _ = connection.execute_batch("ROLLBACK;");
+                Err(error)
+            }
+        }
+    })
+}
+
 pub fn attach_tags_to_file(state: &AppState, file_id: &str, tag_ids: Vec<String>) -> AppResult<()> {
     let workspace = state.workspace()?;
     workspace.with_db(|connection| {

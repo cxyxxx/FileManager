@@ -9,7 +9,7 @@ import { useTags } from "../../features/tags/hooks/useTags";
 
 export function InboxPage() {
   const { files, loading, error, refresh } = useInboxFiles();
-  const { tags } = useTags();
+  const { tags, create } = useTags();
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const [batchMode, setBatchMode] = useState<"tags" | null>(null);
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
@@ -144,7 +144,13 @@ export function InboxPage() {
             <h3>批量添加 tag</h3>
             <p>为选中的 {selectedFileIds.length} 个文件添加一个或多个 tag。</p>
           </div>
-          <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} />
+          <TagPicker
+            tags={tags}
+            selectedIds={selectedTagIds}
+            onChange={setSelectedTagIds}
+            onCreateTag={create}
+            createDefaults={{ tagType: "topic", isTopicEnabled: true }}
+          />
           <div className="toolbar end">
             <button className="button secondary" type="button" onClick={() => setBatchMode(null)}>
               取消
@@ -161,7 +167,13 @@ export function InboxPage() {
             <h3>添加 tag</h3>
             <p>选择一个或多个 tag 后，文件会按 topic tag 从 Inbox 中移出。</p>
           </div>
-          <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} />
+          <TagPicker
+            tags={tags}
+            selectedIds={selectedTagIds}
+            onChange={setSelectedTagIds}
+            onCreateTag={create}
+            createDefaults={{ tagType: "topic", isTopicEnabled: true }}
+          />
           <div className="toolbar end">
             <button className="button secondary" type="button" onClick={() => setActiveFileId(null)}>
               取消

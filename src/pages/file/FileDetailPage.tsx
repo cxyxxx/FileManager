@@ -17,8 +17,11 @@ import { FileContentPanel } from "../../features/files/components/FileContentPan
 import { FilePreviewPanel } from "../../features/files/components/FilePreviewPanel";
 import { formatBytes, formatDate } from "../../features/files/components/FileTable";
 import { SummaryEditor } from "../../features/files/components/SummaryEditor";
+import { TagPicker } from "../../features/tags/components/TagPicker";
 import { useTags } from "../../features/tags/hooks/useTags";
+import { useImeSafeHandlers } from "../../shared/lib/ime";
 import type { FilePageData, TagSuggestion } from "../../shared/types/domain";
+import { createDerivedVersion } from "../../features/versions/api/versionsApi";
 
 export function FileDetailPage({ fileId }: { fileId: string }) {
   const [data, setData] = useState<FilePageData | null>(null);
@@ -33,7 +36,7 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [tagError, setTagError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const { tags } = useTags();
+  const { tags, create } = useTags();
 
   const load = useCallback(async () => {
     if (!fileId) {
@@ -160,9 +163,34 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
               generating={generatingSummary}
               generateError={generateError}
             />
-            <EditableTagList allTags={tags} attachedTags={data.tags} suggestions={suggestions} saving={savingTags} error={tagError} onSave={saveTags} />
+            <EditableTagList
+              allTags={tags}
+              attachedTags={data.tags}
+              suggestions={suggestions}
+              saving={savingTags}
+              error={tagError}
+              onSave={saveTags}
+            />
             <FileContentPanel fileId={fileId} onExtracted={async () => setSuggestions(await suggestTagsForFile(fileId))} />
             <FilePreviewPanel fileId={fileId} />
+            <div className="content-section">
+              <div className="section-title-row">
+                <h3>创建版本</h3>
+              </div>
+              <VersionCreateCard fileId={fileId} />
+            </div>
+            <div className="content-section">
+              <div className="section-title-row">
+                <h3>快速添加 Tag</h3>
+              </div>
+              <TagPicker
+                tags={tags}
+                selectedIds={data.tags.map((tag) => tag.id)}
+                onChange={(ids) => void saveTags(ids)}
+                onCreateTag={create}
+                createDefaults={{ tagType: "topic", isTopicEnabled: true }}
+              />
+            </div>
           </div>
           <aside className="side-panel">
             <h3>文件操作</h3>
@@ -174,6 +202,11 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
               onArchive={confirmArchive}
               onRestore={() => void runAction(() => restoreFile(fileId), load)}
             />
+            <div className="toolbar">
+              <button className="button secondary small" type="button" onClick={() => navigateTo(`/versions?fileId=${encodeURIComponent(fileId)}`)}>
+                查看版本页
+              </button>
+            </div>
             {actionError ? <p className="error-text">操作失败：{actionError}</p> : null}
             <h3>版本信息</h3>
             {data.versions.length > 0 ? (
@@ -197,6 +230,37 @@ export function FileDetailPage({ fileId }: { fileId: string }) {
         </div>
       ) : null}
     </section>
+  );
+}
+
+function VersionCreateCard({ fileId }: { fileId: string }) {
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const ime = useImeSafeHandlers();
+
+  async function createVersion() {
+    const nextName = name.trim() || undefined;
+    setCreating(true);
+    setError(null);
+    try {
+      const created = await createDerivedVersion(fileId, { name: nextName });
+      navigateTo(`/files/${encodeURIComponent(created.id)}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="version-create-card" {...ime}>
+      <input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="新版本文件名（可选）" />
+      <button className="button" type="button" disabled={creating} onClick={() => void createVersion()}>
+        {creating ? "创建中..." : "创建新版本"}
+      </button>
+      {error ? <p className="error-text">创建失败：{error}</p> : null}
+    </div>
   );
 }
 

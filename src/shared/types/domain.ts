@@ -18,6 +18,11 @@ export type FileRecord = {
   storedName: string;
   sourcePath: string | null;
   relativePath: string;
+  importBatchId?: string | null;
+  importRootName?: string | null;
+  importRootPath?: string | null;
+  importRelativePath?: string | null;
+  importedAt?: string | null;
   extension?: string;
   mimeType?: string;
   sizeBytes: number;

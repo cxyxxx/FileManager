@@ -5,6 +5,7 @@ import { saveQuery } from "../../features/queries/api/queriesApi";
 import { SearchResultList } from "../../features/search/components/SearchResultList";
 import { TagPicker } from "../../features/tags/components/TagPicker";
 import { useTags } from "../../features/tags/hooks/useTags";
+import { useImeSafeHandlers } from "../../shared/lib/ime";
 import type { FileSearchResult, SearchScope } from "../../shared/types/domain";
 
 const scopeOptions: Array<{ value: SearchScope; label: string }> = [
@@ -17,7 +18,8 @@ const scopeOptions: Array<{ value: SearchScope; label: string }> = [
 export function SearchPage() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const initialKeyword = params.get("q") ?? "";
-  const { tags } = useTags();
+  const { tags, create } = useTags();
+  const ime = useImeSafeHandlers();
   const [keyword, setKeyword] = useState(initialKeyword);
   const [fileTypesText, setFileTypesText] = useState("");
   const [scopes, setScopes] = useState<SearchScope[]>(["fileName", "summary", "tag", "content"]);
@@ -111,7 +113,7 @@ export function SearchPage() {
         <h2>关键词搜索</h2>
         <p>搜索文件名、摘要、tag 名和已抽取正文。</p>
       </div>
-      <form className="search-form" onSubmit={onSubmit}>
+      <form className="search-form" onSubmit={onSubmit} {...ime}>
         <div className="toolbar">
           <input className="input search-input" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="输入关键词" />
           <button className="button" type="submit" disabled={loading || !keyword.trim()}>
@@ -144,7 +146,13 @@ export function SearchPage() {
         </button>
         <div className="content-section">
           <h3>筛选 tag</h3>
-          <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} />
+          <TagPicker
+            tags={tags}
+            selectedIds={selectedTagIds}
+            onChange={setSelectedTagIds}
+            onCreateTag={create}
+            createDefaults={{ tagType: "topic", isTopicEnabled: true }}
+          />
         </div>
       </form>
       {error ? <p className="error-text">搜索错误：{error}</p> : null}

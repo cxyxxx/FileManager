@@ -35,7 +35,12 @@ pub fn insert_edge(connection: &Connection, edge: &VersionEdge) -> AppResult<()>
         INSERT INTO version_edges (id, source_file_id, derived_file_id, created_at)
         VALUES (?1, ?2, ?3, ?4)
         "#,
-        params![edge.id, edge.source_file_id, edge.derived_file_id, edge.created_at],
+        params![
+            edge.id,
+            edge.source_file_id,
+            edge.derived_file_id,
+            edge.created_at
+        ],
     )?;
     Ok(())
 }
@@ -52,14 +57,17 @@ pub fn find_node_by_file(connection: &Connection, file_id: &str) -> AppResult<Op
 }
 
 pub fn get_node_by_file(connection: &Connection, file_id: &str) -> AppResult<VersionNode> {
-    find_node_by_file(connection, file_id)?.ok_or_else(|| AppError::NotFound(format!("version node for {file_id}")))
+    find_node_by_file(connection, file_id)?
+        .ok_or_else(|| AppError::NotFound(format!("version node for {file_id}")))
 }
 
 pub fn list_group_nodes(connection: &Connection, group_id: &str) -> AppResult<Vec<VersionNode>> {
-    let mut statement =
-        connection.prepare("SELECT * FROM version_nodes WHERE group_id = ?1 ORDER BY created_at ASC")?;
+    let mut statement = connection
+        .prepare("SELECT * FROM version_nodes WHERE group_id = ?1 ORDER BY created_at ASC")?;
     let rows = statement.query_map(params![group_id], map_node)?;
-    let nodes = rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)?;
+    let nodes = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)?;
     Ok(nodes)
 }
 

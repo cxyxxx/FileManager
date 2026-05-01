@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import type { Tag, UpdateTagPayload } from "../../../shared/types/domain";
+import { useImeSafeHandlers } from "../../../shared/lib/ime";
 
 type TagEditDialogProps = {
   tag: Tag | null;
@@ -16,6 +17,7 @@ export function TagEditDialog({ tag, tags, saving = false, error, onClose, onSav
   const [tagType, setTagType] = useState("topic");
   const [parentId, setParentId] = useState("");
   const [isTopicEnabled, setIsTopicEnabled] = useState(true);
+  const ime = useImeSafeHandlers();
 
   useEffect(() => {
     setName(tag?.name ?? "");
@@ -49,7 +51,7 @@ export function TagEditDialog({ tag, tags, saving = false, error, onClose, onSav
           关闭
         </button>
       </div>
-      <form className="edit-form" onSubmit={submit}>
+      <form className="edit-form" onSubmit={submit} {...ime}>
         <input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="Tag name" />
         <select className="input" value={tagType} onChange={(event) => setTagType(event.target.value)}>
           <option value="topic">topic</option>

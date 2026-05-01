@@ -1,3 +1,4 @@
+import { open } from "@tauri-apps/plugin-dialog";
 import { command } from "../../../shared/lib/tauri";
 import type {
   FileContent,
@@ -62,6 +63,10 @@ export function restoreFile(fileId: string) {
   return command<void>("restore_file", { fileId });
 }
 
+export function clearAllFiles() {
+  return command<number>("clear_all_files");
+}
+
 export function searchFiles(keyword: string, options?: SearchFilesOptions) {
   return command<FileSearchResult[]>("search_files", { keyword, options });
 }
@@ -91,10 +96,65 @@ export function suggestTagsForFile(fileId: string) {
 }
 
 export function selectFiles(): Promise<string[]> {
+  return selectPaths({ directory: false, allowMultiple: true });
+}
+
+export function selectFolder(): Promise<string[]> {
+  return selectPaths({ directory: true, allowMultiple: true });
+}
+
+async function selectPaths({
+  directory,
+  allowMultiple,
+}: {
+  directory: boolean;
+  allowMultiple: boolean;
+}): Promise<string[]> {
+  if (hasTauriDialog()) {
+    const selected = await open({
+      directory,
+      multiple: allowMultiple,
+    });
+    return normalizeSelection(selected);
+  }
+
+  return selectPathsFromInput({ directory, allowMultiple });
+}
+
+function hasTauriDialog() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const tauriWindow = window as Window & {
+    __TAURI_INTERNALS__?: {
+      invoke?: unknown;
+    };
+  };
+  return typeof tauriWindow.__TAURI_INTERNALS__?.invoke === "function";
+}
+
+function normalizeSelection(selected: string | string[] | null): string[] {
+  if (selected === null) {
+    return [];
+  }
+  return Array.isArray(selected) ? selected : [selected];
+}
+
+function selectPathsFromInput({
+  directory,
+  allowMultiple,
+}: {
+  directory: boolean;
+  allowMultiple: boolean;
+}): Promise<string[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.multiple = true;
+    input.multiple = allowMultiple;
+    if (directory) {
+      input.setAttribute("webkitdirectory", "");
+      input.setAttribute("mozdirectory", "");
+    }
     input.style.display = "none";
     input.addEventListener(
       "change",

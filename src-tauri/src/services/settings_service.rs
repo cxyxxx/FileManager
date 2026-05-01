@@ -11,6 +11,9 @@ pub struct SettingsInfo {
 
 pub fn get_settings_info(state: &AppState) -> AppResult<SettingsInfo> {
     Ok(SettingsInfo {
-        workspace_root: state.workspace().ok().map(|workspace| workspace.info.root_path),
+        workspace_root: state
+            .workspace()
+            .ok()
+            .map(|workspace| workspace.info.root_path),
     })
 }

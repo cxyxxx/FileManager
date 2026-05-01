@@ -16,6 +16,11 @@ pub fn run_migrations(connection: &Connection) -> AppResult<()> {
           stored_name TEXT NOT NULL,
           source_path TEXT,
           relative_path TEXT NOT NULL UNIQUE,
+          import_batch_id TEXT,
+          import_root_name TEXT,
+          import_root_path TEXT,
+          import_relative_path TEXT,
+          imported_at TEXT,
           size_bytes INTEGER NOT NULL,
           sha256 TEXT NOT NULL,
           status TEXT NOT NULL,
@@ -88,6 +93,11 @@ pub fn run_migrations(connection: &Connection) -> AppResult<()> {
         "#,
     )?;
     ensure_column(connection, "files", "summary", "TEXT")?;
+    ensure_column(connection, "files", "import_batch_id", "TEXT")?;
+    ensure_column(connection, "files", "import_root_name", "TEXT")?;
+    ensure_column(connection, "files", "import_root_path", "TEXT")?;
+    ensure_column(connection, "files", "import_relative_path", "TEXT")?;
+    ensure_column(connection, "files", "imported_at", "TEXT")?;
     ensure_column(
         connection,
         "saved_queries",

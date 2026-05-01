@@ -23,40 +23,16 @@ enum ImportedFile {
 
 pub fn import_files(state: &AppState, paths: Vec<String>) -> AppResult<ImportBatchResult> {
     let workspace = state.workspace()?;
-    let mut items = Vec::with_capacity(paths.len());
+    let sources = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
+    if sources.is_empty() {
+        return Ok(ImportBatchResult { items: Vec::new() });
+    }
+    let batch_root = import_batch_root(&sources)?;
+    let batch = ImportBatchContext::new(&batch_root)?;
+    let mut items = Vec::new();
 
-    for path in paths {
-        let source = PathBuf::from(&path);
-        let original_name = source
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| name.to_string());
-        match import_single_file(&workspace, &source) {
-            Ok(ImportedFile::Created(file)) => items.push(ImportResultItem {
-                path,
-                original_name,
-                status: "success".into(),
-                file: Some(file),
-                reason: None,
-                duplicate_of: None,
-            }),
-            Ok(ImportedFile::Duplicate(duplicate_of)) => items.push(ImportResultItem {
-                path,
-                original_name,
-                status: "duplicate".into(),
-                file: None,
-                reason: None,
-                duplicate_of: Some(duplicate_of),
-            }),
-            Err(error) => items.push(ImportResultItem {
-                path,
-                original_name,
-                status: "failed".into(),
-                file: None,
-                reason: Some(error.to_string()),
-                duplicate_of: None,
-            }),
-        }
+    for source in &sources {
+        import_source_tree(&workspace, &batch_root, source, &batch, &mut items)?;
     }
 
     Ok(ImportBatchResult { items })
@@ -182,6 +158,34 @@ pub fn restore_file(state: &AppState, file_id: &str) -> AppResult<()> {
     })
 }
 
+pub fn clear_all_files(state: &AppState) -> AppResult<usize> {
+    let workspace = state.workspace()?;
+    let deleted_count = workspace.with_db(|connection| {
+        connection.execute_batch("BEGIN IMMEDIATE TRANSACTION;")?;
+        let result = (|| {
+            let deleted_files = connection.execute("DELETE FROM files", [])?;
+            connection.execute("DELETE FROM version_groups", [])?;
+            Ok(deleted_files)
+        })();
+
+        match result {
+            Ok(deleted_files) => {
+                connection.execute_batch("COMMIT;")?;
+                Ok(deleted_files)
+            }
+            Err(error) => {
+                let _ = connection.execute_batch("ROLLBACK;");
+                Err(error)
+            }
+        }
+    })?;
+
+    clear_directory_contents(Path::new(&workspace.info.files_path))?;
+    clear_directory_contents(Path::new(&workspace.info.previews_path))?;
+
+    Ok(deleted_count)
+}
+
 pub fn open_file(state: &AppState, file_id: &str) -> AppResult<()> {
     let path = stored_file_path(state, file_id)?;
     open_path(&path)
@@ -213,7 +217,8 @@ pub fn search_files(
         for tag_id in &required_tag_ids {
             tag_repo::get(connection, tag_id)?;
         }
-        let required_tag_set = required_tag_ids.into_iter().collect::<HashSet<_>>();
+        let all_tags = tag_repo::list(connection)?;
+        let required_tag_families = expand_tag_families(&required_tag_ids, &all_tags);
         let scopes = options
             .scopes
             .unwrap_or_else(|| {
@@ -248,10 +253,10 @@ pub fn search_files(
                 .iter()
                 .map(|tag| tag.id.clone())
                 .collect::<HashSet<_>>();
-            if !required_tag_set.is_empty()
-                && !required_tag_set
+            if !required_tag_families.is_empty()
+                && !required_tag_families
                     .iter()
-                    .all(|tag_id| tag_ids.contains(tag_id))
+                    .all(|family| family.iter().any(|tag_id| tag_ids.contains(tag_id)))
             {
                 continue;
             }
@@ -513,7 +518,182 @@ fn persist_file_content(
     })
 }
 
-fn import_single_file(workspace: &WorkspaceContext, source: &Path) -> AppResult<ImportedFile> {
+fn stored_file_path(state: &AppState, file_id: &str) -> AppResult<PathBuf> {
+    let workspace = state.workspace()?;
+    let file = workspace.with_db(|connection| file_repo::get(connection, file_id))?;
+    Ok(PathBuf::from(workspace.info.root_path).join(file.relative_path))
+}
+
+fn clear_directory_contents(path: &Path) -> AppResult<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    for entry in std_fs::read_dir(path)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            std_fs::remove_dir_all(&entry_path)?;
+        } else {
+            std_fs::remove_file(&entry_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct ImportBatchContext {
+    id: String,
+    root_name: String,
+    root_path: String,
+    imported_at: String,
+}
+
+impl ImportBatchContext {
+    fn new(source: &Path) -> AppResult<Self> {
+        Ok(Self {
+            id: ids::new_id(),
+            root_name: source_basename(source)?,
+            root_path: source.to_string_lossy().to_string(),
+            imported_at: clock::now_iso(),
+        })
+    }
+}
+
+fn import_batch_root(paths: &[PathBuf]) -> AppResult<PathBuf> {
+    let mut iter = paths.iter();
+    let first = iter
+        .next()
+        .ok_or_else(|| AppError::InvalidInput("no import paths provided".into()))?;
+
+    if paths.len() == 1 {
+        return Ok(first.clone());
+    }
+
+    let mut root = first.clone();
+    for source in iter {
+        root = common_path_prefix(&root, source)
+            .ok_or_else(|| AppError::InvalidInput("failed to derive import root".into()))?;
+    }
+
+    Ok(root)
+}
+
+fn common_path_prefix(left: &Path, right: &Path) -> Option<PathBuf> {
+    let left_components = left.components().collect::<Vec<_>>();
+    let right_components = right.components().collect::<Vec<_>>();
+    let mut prefix = Vec::new();
+
+    for (left_component, right_component) in left_components.iter().zip(right_components.iter()) {
+        if left_component != right_component {
+            break;
+        }
+        prefix.push((*left_component).clone());
+    }
+
+    if prefix.is_empty() {
+        None
+    } else {
+        Some(prefix.into_iter().collect())
+    }
+}
+
+fn import_source_tree(
+    workspace: &WorkspaceContext,
+    root_source: &Path,
+    current: &Path,
+    batch: &ImportBatchContext,
+    items: &mut Vec<ImportResultItem>,
+) -> AppResult<()> {
+    if current.is_dir() {
+        let entries = std_fs::read_dir(current)?;
+        for entry in entries {
+            match entry {
+                Ok(entry) => {
+                    import_source_tree(workspace, root_source, &entry.path(), batch, items)?;
+                }
+                Err(error) => {
+                    items.push(ImportResultItem {
+                        path: current.to_string_lossy().to_string(),
+                        original_name: None,
+                        status: "failed".into(),
+                        file: None,
+                        reason: Some(error.to_string()),
+                        duplicate_of: None,
+                    });
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    if current.is_file() {
+        match import_single_source_file(workspace, root_source, current, batch) {
+            Ok(ImportedFile::Created(file)) => {
+                items.push(ImportResultItem {
+                    path: current.to_string_lossy().to_string(),
+                    original_name: Some(file.original_name.clone()),
+                    status: "success".into(),
+                    file: Some(file),
+                    reason: None,
+                    duplicate_of: None,
+                });
+            }
+            Ok(ImportedFile::Duplicate(duplicate_of)) => {
+                items.push(ImportResultItem {
+                    path: current.to_string_lossy().to_string(),
+                    original_name: Some(
+                        current
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                    ),
+                    status: "duplicate".into(),
+                    file: None,
+                    reason: None,
+                    duplicate_of: Some(duplicate_of),
+                });
+            }
+            Err(error) => {
+                items.push(ImportResultItem {
+                    path: current.to_string_lossy().to_string(),
+                    original_name: Some(
+                        current
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                    ),
+                    status: "failed".into(),
+                    file: None,
+                    reason: Some(error.to_string()),
+                    duplicate_of: None,
+                });
+            }
+        }
+        return Ok(());
+    }
+
+    items.push(ImportResultItem {
+        path: current.to_string_lossy().to_string(),
+        original_name: None,
+        status: "failed".into(),
+        file: None,
+        reason: Some(AppError::FileNotFound.to_string()),
+        duplicate_of: None,
+    });
+    Ok(())
+}
+
+fn import_single_source_file(
+    workspace: &WorkspaceContext,
+    root_source: &Path,
+    source: &Path,
+    batch: &ImportBatchContext,
+) -> AppResult<ImportedFile> {
     if !source.is_file() {
         return Err(AppError::FileNotFound);
     }
@@ -525,11 +705,7 @@ fn import_single_file(workspace: &WorkspaceContext, source: &Path) -> AppResult<
     }
 
     let id = ids::new_id();
-    let original_name = source
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| AppError::InvalidInput("source file name is invalid".into()))?
-        .to_string();
+    let original_name = source_basename(source)?;
     let safe_name = fs::sanitize_file_name(&original_name);
     let stored_name = format!("{id}_{safe_name}");
     let (year, month) = clock::year_month_segments();
@@ -547,6 +723,11 @@ fn import_single_file(workspace: &WorkspaceContext, source: &Path) -> AppResult<
         stored_name,
         source_path: Some(source.to_string_lossy().to_string()),
         relative_path: fs::relative_files_path(&year, &month, &format!("{id}_{safe_name}")),
+        import_batch_id: Some(batch.id.clone()),
+        import_root_name: Some(batch.root_name.clone()),
+        import_root_path: Some(batch.root_path.clone()),
+        import_relative_path: Some(import_relative_path(root_source, source)?),
+        imported_at: Some(batch.imported_at.clone()),
         size_bytes: metadata.len() as i64,
         sha256,
         summary: None,
@@ -577,44 +758,58 @@ fn import_single_file(workspace: &WorkspaceContext, source: &Path) -> AppResult<
     Ok(ImportedFile::Created(record))
 }
 
-fn stored_file_path(state: &AppState, file_id: &str) -> AppResult<PathBuf> {
-    let workspace = state.workspace()?;
-    let file = workspace.with_db(|connection| file_repo::get(connection, file_id))?;
-    Ok(PathBuf::from(workspace.info.root_path).join(file.relative_path))
+fn source_basename(path: &Path) -> AppResult<String> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_string())
+        .ok_or_else(|| AppError::InvalidInput("source file name is invalid".into()))
+}
+
+fn import_relative_path(root_source: &Path, source: &Path) -> AppResult<String> {
+    let relative = if root_source.is_file() {
+        source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.to_string())
+            .ok_or_else(|| AppError::InvalidInput("source file name is invalid".into()))?
+    } else {
+        source
+            .strip_prefix(root_source)
+            .map_err(|_| AppError::InvalidInput("failed to derive import relative path".into()))?
+            .to_string_lossy()
+            .to_string()
+    };
+    Ok(relative.replace('\\', "/"))
 }
 
 fn open_path(path: &Path) -> AppResult<()> {
-    let status = if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args(["/C", "start", "", &path.to_string_lossy()])
-            .status()
-    } else if cfg!(target_os = "macos") {
-        Command::new("open").arg(path).status()
-    } else {
-        Command::new("xdg-open").arg(path).status()
-    }?;
-    if status.success() {
+    if !path.exists() {
+        return Err(AppError::FileNotFound);
+    }
+
+    if open_with_system(path) {
         Ok(())
     } else {
-        Err(AppError::Internal(format!(
-            "failed to open {}",
-            path.display()
-        )))
+        let target = reveal_target_path(path);
+        if target.exists() && reveal_with_system(path, &target) {
+            Ok(())
+        } else {
+            Err(AppError::Internal(format!(
+                "failed to open {}",
+                path.display()
+            )))
+        }
     }
 }
 
 fn reveal_path(path: &Path) -> AppResult<()> {
-    let status = if cfg!(target_os = "windows") {
-        Command::new("explorer")
-            .arg(format!("/select,{}", path.display()))
-            .status()
-    } else if cfg!(target_os = "macos") {
-        Command::new("open").arg("-R").arg(path).status()
-    } else {
-        let folder = path.parent().unwrap_or(path);
-        Command::new("xdg-open").arg(folder).status()
-    }?;
-    if status.success() {
+    let target = reveal_target_path(path);
+
+    if !target.exists() {
+        return Err(AppError::FileNotFound);
+    }
+
+    if reveal_with_system(path, &target) {
         Ok(())
     } else {
         Err(AppError::Internal(format!(
@@ -622,6 +817,61 @@ fn reveal_path(path: &Path) -> AppResult<()> {
             path.display()
         )))
     }
+}
+
+fn reveal_target_path(path: &Path) -> PathBuf {
+    path.parent().unwrap_or(path).to_path_buf()
+}
+
+fn open_with_system(path: &Path) -> bool {
+    if cfg!(target_os = "windows") {
+        let mut command = Command::new("cmd");
+        command.args(["/C", "start", ""]).arg(path);
+        command_succeeds(&mut command)
+    } else if cfg!(target_os = "macos") {
+        let mut command = Command::new("open");
+        command.arg(path);
+        command_succeeds(&mut command)
+    } else {
+        let mut gio = Command::new("gio");
+        gio.arg("open").arg(path);
+        if command_succeeds(&mut gio) {
+            return true;
+        }
+
+        let mut xdg_open = Command::new("xdg-open");
+        xdg_open.arg(path);
+        command_succeeds(&mut xdg_open)
+    }
+}
+
+fn reveal_with_system(original_path: &Path, target: &Path) -> bool {
+    if cfg!(target_os = "windows") {
+        let mut command = Command::new("explorer");
+        command.arg(format!("/select,{}", original_path.display()));
+        command_succeeds(&mut command)
+    } else if cfg!(target_os = "macos") {
+        let mut command = Command::new("open");
+        command.arg("-R").arg(original_path);
+        command_succeeds(&mut command)
+    } else {
+        let mut gio = Command::new("gio");
+        gio.arg("open").arg(target);
+        if command_succeeds(&mut gio) {
+            return true;
+        }
+
+        let mut xdg_open = Command::new("xdg-open");
+        xdg_open.arg(target);
+        command_succeeds(&mut xdg_open)
+    }
+}
+
+fn command_succeeds(command: &mut Command) -> bool {
+    command
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 fn file_extension(file: &FileRecord) -> String {
@@ -706,4 +956,91 @@ fn score_result(result: &FileSearchResult) -> usize {
         score += 60;
     }
     score
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn source_basename_strips_parent_path() {
+        let path = Path::new("/tmp/imports/深度学习/强化学习/DQL.md");
+        assert_eq!(source_basename(path).unwrap(), "DQL.md");
+    }
+
+    #[test]
+    fn import_relative_path_keeps_folder_structure() {
+        let root = Path::new("/tmp/imports/深度学习");
+        let file = Path::new("/tmp/imports/深度学习/强化学习/DQL.md");
+        assert_eq!(import_relative_path(root, file).unwrap(), "强化学习/DQL.md");
+    }
+
+    #[test]
+    fn import_batch_root_uses_common_parent_for_multiple_files() {
+        let sources = vec![
+            PathBuf::from("/tmp/imports/年度归档/发票/A.pdf"),
+            PathBuf::from("/tmp/imports/年度归档/发票/B.pdf"),
+            PathBuf::from("/tmp/imports/年度归档/发票/子目录/C.pdf"),
+        ];
+        assert_eq!(
+            import_batch_root(&sources).unwrap(),
+            PathBuf::from("/tmp/imports/年度归档/发票")
+        );
+    }
+
+    #[test]
+    fn import_batch_root_keeps_single_file_as_is() {
+        let sources = vec![PathBuf::from("/tmp/imports/年度归档/发票/A.pdf")];
+        assert_eq!(
+            import_batch_root(&sources).unwrap(),
+            PathBuf::from("/tmp/imports/年度归档/发票/A.pdf")
+        );
+    }
+
+    #[test]
+    fn reveal_target_path_uses_parent_for_files() {
+        let path = Path::new("/tmp/workspace/files/2026/05/example.bin");
+        assert_eq!(
+            reveal_target_path(path),
+            PathBuf::from("/tmp/workspace/files/2026/05")
+        );
+    }
+}
+
+fn expand_tag_families(
+    tag_ids: &[String],
+    tags: &[crate::domain::tag::Tag],
+) -> Vec<HashSet<String>> {
+    tag_ids
+        .iter()
+        .map(|tag_id| {
+            descendant_tag_ids(tag_id, tags)
+                .into_iter()
+                .collect::<HashSet<_>>()
+        })
+        .collect()
+}
+
+fn descendant_tag_ids(root_id: &str, tags: &[crate::domain::tag::Tag]) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut visited = HashSet::new();
+    let mut queue = std::collections::VecDeque::from([root_id.to_string()]);
+
+    while let Some(parent_id) = queue.pop_front() {
+        if !visited.insert(parent_id.clone()) {
+            continue;
+        }
+        result.push(parent_id.clone());
+        for tag in tags
+            .iter()
+            .filter(|tag| tag.parent_id.as_deref() == Some(parent_id.as_str()))
+        {
+            if !visited.contains(&tag.id) {
+                queue.push_back(tag.id.clone());
+            }
+        }
+    }
+
+    result
 }

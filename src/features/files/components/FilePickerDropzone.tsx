@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { selectFiles } from "../api/filesApi";
+import { selectFiles, selectFolder } from "../api/filesApi";
 
 type FilePickerDropzoneProps = {
   disabled?: boolean;
@@ -50,6 +50,16 @@ export function FilePickerDropzone({ disabled = false, onImport }: FilePickerDro
     onImport(paths);
   }
 
+  async function chooseFolder() {
+    const paths = await selectFolder();
+    if (paths.length === 0) {
+      setMessage("当前运行环境未返回文件路径，可使用下方高级导入。");
+      return;
+    }
+    setMessage(`准备导入文件夹中的 ${paths.length} 个文件`);
+    onImport(paths);
+  }
+
   function onDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
     const paths = Array.from(event.dataTransfer.files)
@@ -76,10 +86,15 @@ export function FilePickerDropzone({ disabled = false, onImport }: FilePickerDro
       onDrop={onDrop}
     >
       <strong>拖拽文件到这里</strong>
-      <span>或点击选择多个文件导入</span>
-      <button className="button" type="button" disabled={disabled} onClick={chooseFiles}>
-        选择文件
-      </button>
+      <span>也可以直接选择文件夹，递归导入其中所有文件</span>
+      <div className="toolbar compact-actions">
+        <button className="button" type="button" disabled={disabled} onClick={chooseFiles}>
+          选择文件
+        </button>
+        <button className="button secondary" type="button" disabled={disabled} onClick={chooseFolder}>
+          选择文件夹
+        </button>
+      </div>
       {message ? <small>{message}</small> : null}
     </div>
   );

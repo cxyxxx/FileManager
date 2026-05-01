@@ -11,6 +11,11 @@ pub struct FileRecord {
     pub stored_name: String,
     pub source_path: Option<String>,
     pub relative_path: String,
+    pub import_batch_id: Option<String>,
+    pub import_root_name: Option<String>,
+    pub import_root_path: Option<String>,
+    pub import_relative_path: Option<String>,
+    pub imported_at: Option<String>,
     pub size_bytes: i64,
     pub sha256: String,
     pub summary: Option<String>,
@@ -32,6 +37,15 @@ pub struct FilePageData {
 #[serde(rename_all = "camelCase")]
 pub struct ImportBatchResult {
     pub items: Vec<ImportResultItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBatch {
+    pub id: String,
+    pub root_name: String,
+    pub root_path: String,
+    pub imported_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
